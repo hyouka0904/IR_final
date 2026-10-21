@@ -1,48 +1,61 @@
 # 所有超參數集中於此，不要寫死在程式裡（README 1.4）
 
-datasets: []            # roxford5k, rparis6k
+paths:
+  data_root: data
+  cache_root: cache
+  results_root: results
+  revisitop: third_party/revisitop/python
+
+datasets: [roxford5k, rparis6k]
 
 models:
   clip:
-    arch:
-    pretrained:
+    arch: ViT-B-16
+    pretrained: openai
   siglip:
-    arch:
-    pretrained:
+    arch: ViT-B-16-SigLIP
+    pretrained: webli
   dinov2:
-    arch:
+    arch: dinov2_vitb14
+    image_size: 224       # DINOv2 沒有固定輸入尺寸，以此為 scale = 1 的邊長
 
 multiscale:
-  scales: []
+  scales: [0.707, 1.0, 1.414]
 
 retrieval:
-  k:                    # 初始值 100
+  k: 100
 
 aqe:
-  n:
-  alpha:
+  n: 2
+  alpha: 3.0
 
 ensemble:
   weights:
-    clip:
-    siglip:
-    dinov2:
+    clip: 1.0
+    siglip: 1.0
+    dinov2: 1.0
 
 index:
   hnsw:
-    m:
-    ef_construction:
-    ef_search:
+    m: 32
+    ef_construction: 200
+    ef_search: 128
   ivfpq:
-    nlist:
-    m:
-    nbits:
-    nprobe:
+    nlist: 64
+    m: 64                 # 需整除 embedding 維度（CLIP 512、SigLIP / DINOv2 768）
+    nbits: 8
+    nprobe: 8
 
 geometric:
-  ratio_test:
-  ransac_threshold:
-  max_keypoints:
+  max_side: 1024          # 抽 SIFT 前把長邊縮到此長度
+  max_keypoints: 2000
+  ratio_test: 0.8
+  ransac_threshold: 8.0   # 像素，以原圖座標計
+  min_inliers: 15         # inlier 數達此門檻才視為通過驗證
 
 eval:
-  mp_ks: []             # 1, 5, 10
+  protocols: [E, M, H]
+  mp_ks: [1, 5, 10]
+
+demo:
+  n_show: 20              # 每組設定顯示的結果數
