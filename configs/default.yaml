@@ -1,0 +1,48 @@
+# 所有超參數集中於此，不要寫死在程式裡（README 1.4）
+
+datasets: []            # roxford5k, rparis6k
+
+models:
+  clip:
+    arch:
+    pretrained:
+  siglip:
+    arch:
+    pretrained:
+  dinov2:
+    arch:
+
+multiscale:
+  scales: []
+
+retrieval:
+  k:                    # 初始值 100
+
+aqe:
+  n:
+  alpha:
+
+ensemble:
+  weights:
+    clip:
+    siglip:
+    dinov2:
+
+index:
+  hnsw:
+    m:
+    ef_construction:
+    ef_search:
+  ivfpq:
+    nlist:
+    m:
+    nbits:
+    nprobe:
+
+geometric:
+  ratio_test:
+  ransac_threshold:
+  max_keypoints:
+
+eval:
+  mp_ks: []             # 1, 5, 10
