@@ -1,0 +1,13 @@
+# torch / torchvision / faiss 依 README 1.2 另外安裝（依 CUDA 版本而定）
+open_clip_torch      # CLIP, SigLIP
+timm
+opencv-python>=4.5   # SIFT（4.4 版起已併入主套件）
+gradio
+numpy
+scipy
+pandas
+h5py                 # SIFT 特徵與 inlier 快取的存檔格式
+pyyaml
+tqdm
+matplotlib
+pillow
