@@ -220,6 +220,26 @@ python app/app.py
 
 - `05_run_grid.py` 必須在 demo 之前執行，因為「困難 query 清單」需要讀取 `results/{dataset}/per_query/`。
 - 第一次跑含幾何驗證的設定時，會建立 inlier 快取，之後的設定可以直接重用。報告中的消融路徑直接從 `summary.csv` 擷取，不需要另外重跑。
+- 不裁切 query 的補充實驗：`python scripts/05_run_grid.py --dataset roxford5k --no-crop`，輸出 `results/{dataset}/summary_nocrop.csv`（只含三個模型的 `ss-flat-none` baseline）。
+
+### 4.1 實作備註
+
+以下是文件沒有規定、在實作時做的決定：
+
+- **完整排序**：revisitop 的 `compute_map` 需要每個 query 對整個圖庫的排序。評估時前 K 名取自該設定的結果（含 re-ranking），其餘依精確 cosine 分數補齊（`ens` 時為加權融合分數）。所有設定都以同樣方式補齊，因此設定間的差異只來自前 K 名。
+- **Multi-scale**：CLIP / SigLIP 的 ViT 輸入解析度固定，scale ≥ 1 時放大後中央裁切、scale < 1 時縮小後貼在畫布中央；DINOv2 解析度可變，直接以 `base × scale`（取 14 的倍數）輸入。各尺度向量相加後再 L2-normalize。尺度在 `configs/default.yaml` 的 `multiscale.scales`。
+- **alpha-QE**：`q' = normalize(q + Σ max(s_i, 0)^α · x_i)`，取初次檢索前 n 名，分數以精確 embedding 重算。延遲計入 re-ranking 階段。
+- **幾何驗證**：RootSIFT + ratio test + RANSAC homography。inlier 數達 `min_inliers` 的候選依 inlier 數排到前面，其餘維持原順序。inlier 快取只用於以 bbx 裁切的官方 query，並記錄每一對的計算耗時，快取命中時延遲仍以實際計算成本回報。
+- **延遲**：`05_run_grid.py` 使用快取的 query embedding，embed 階段的延遲取自 `02_extract_embeddings.py` 逐張量測的結果（`*_q_time.json`，會記錄裝置）。search / rerank 在 CPU 上現場量測。
+- **recall 損失**：同一組 model / scale / rerank 下，ANN 索引實際回傳的 top-K 與 Flat 的 top-K 比較。
+
+### 4.2 實作狀態
+
+程式已依本文件完成，但**尚未在真實資料上執行過**：開發環境沒有安裝套件，也沒有下載資料集與模型權重，目前只通過語法檢查。第一次執行時請依第 4 節順序逐步確認。已知風險：
+
+- revisitop 的圖片下載來源（robots.ox.ac.uk）可能失效，`01_download_data.sh` 會檢查並提示。
+- `open_clip.get_model_preprocess_cfg` 需要 open_clip_torch ≥ 2.23。
+- 在沒有 GPU 的機器上抽 embedding（3 個模型 × 2 種尺度 × 約 1.1 萬張圖）需要數小時。
 
 ---
 
