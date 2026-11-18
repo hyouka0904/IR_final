@@ -113,3 +113,16 @@ class TagSet:
     @staticmethod
     def save(cache_root: str, set_name: str, top: np.ndarray, probs: np.ndarray, tcfg: dict) -> None:
         np.savez(tags_path(cache_root, set_name), top=top, probs=probs, vocab=vocab_name(tcfg["vocab"]))
+
+
+def load_query_features(cache_root: str, set_name: str, n: int, reps: set[str]) -> list[dict]:
+    """評估用：把快取的 query 特徵整理成 pipeline.search 的 query_feats（每個 query 一個 dict）。"""
+    arrays = {r: np.load(feature_path(cache_root, set_name, r)) for r in reps if r in REPS}
+    tags = np.load(tags_path(cache_root, set_name)) if "tags" in reps else None
+    out = []
+    for i in range(n):
+        q = {r: a[i] for r, a in arrays.items()}
+        if tags is not None:
+            q["tags"] = (tags["top"][i], tags["probs"][i])
+        out.append(q)
+    return out

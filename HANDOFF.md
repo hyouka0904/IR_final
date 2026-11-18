@@ -1,6 +1,6 @@
 # HANDOFF
 
-> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-18（階段 1：核心模組）
+> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-18（階段 2：離線腳本）
 
 ## 任務目標
 
@@ -34,10 +34,15 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
   - 後處理：`src/rerank/rocchio.py`、`mmr.py`、`rrf.py`（`aqe.py` 沿用）
   - `src/pipeline.py`、`src/schema.py` 改寫；`src/eval/metrics.py`（trec_eval 定義）、`trec.py`、`protocol.py`、`revisited_eval.py`
   - 刪除：SIFT/RANSAC、multi-scale、舊的 02–05 腳本、inlier 視覺化、舊困難 query 元件
+- [x] 階段 2：離線腳本 03–07
+  - `03_extract_features.py`：向量（圖庫 batch、query 逐張計時）、pHash、CLIP tag
+  - `04_build_indexes.py`：各圖庫的 flat/hnsw/ivfpq/cp、pHash flat、tag inverted index，並記錄建立時間
+  - `05_run_eval.py`：各 query set 的 summary / summary_by_edit / per_query / TREC run；`--speed` 跑索引比較（recall 損失、延遲、大小）
+  - `06_human_judgments.py`：pool（盲標 CSV + HTML 對照表 + 另存系統來源）→ kappa → qrels
+  - `07_roxford_supplementary.py`：bbx 裁切、revisitop compute_map
 
 ## 未完成
 
-- [ ] 腳本：03 抽特徵、04 建索引、05 評估、06 人工標註、07 ROxford supplementary
 - [ ] Gradio demo 改寫
 - [ ] README 改寫
 - [ ] requirements.txt 更新
@@ -70,8 +75,12 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 PYTHONPATH=<dir> python3 -m pytest -q -p no:cacheprovider tests
 ```
 
+- 階段 2：煙霧測試（假的 COCO / Holidays / phone 資料＋隨機特徵，代替需要 torch 的 03）：
+  `02 → 04 → 05 → 05 --speed → 06 pool → （模擬兩位評審）→ 06 kappa → 06 qrels → 05 --queries phone` 全部跑通，
+  輸出欄位正確；similar 的 query 向量 = 原圖 + 雜訊時，向量模型 mAP = 1，IVF-PQ / cp 有 recall 損失。產生假資料的程式在 scratchpad，未進 repo。
+  03、07 需要 torch / open_clip / 模型權重，**尚未執行過**。
 - 階段 1：**43 passed**（指標 vs pytrec_eval、BM25 公式、cluster pruning、各索引、pHash、alpha-QE/Rocchio/MMR/RRF、manifest/qrels、edit、pipeline 各設定、評估流程含 Rocchio frozen ranking）
 
 ## 下一步
 
-寫 03–07 腳本，再改寫 demo 與 README。
+改寫 Gradio demo，再改寫 README、更新 requirements.txt。
