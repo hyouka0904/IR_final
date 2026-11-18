@@ -1,4 +1,4 @@
-# 所有超參數集中於此，不要寫死在程式裡（README 1.4）
+# 所有超參數集中於此，不要寫死在程式裡
 
 paths:
   data_root: data
@@ -6,8 +6,42 @@ paths:
   results_root: results
   revisitop: third_party/revisitop/python
 
-datasets: [roxford5k, rparis6k]
+seed: 0
 
+# ---------- 資料（scripts/02_prepare_data.py） ----------
+data:
+  coco:
+    gallery_split: train2017
+    query_split: val2017
+    gallery_size: 40000
+    n_semantic_queries: 1000
+    n_similar_queries: 1000
+    # 只抽至少有一個標註物件的圖，semantic 的分級才有定義
+  box_queries:
+    # 意圖消歧（the cat or the sofa?）：從含 >= 2 個類別的 semantic query 中，
+    # 選一個物件框起來，qrels 只看該類別
+    min_categories: 2
+    min_area_frac: 0.05     # 物件框面積至少佔整張圖的比例
+    pad_frac: 0.1           # 框向外擴的比例
+  edits:
+    types: [crop, rotation, color, jpeg, blur]
+    crop:
+      area: [0.3, 0.7]      # 保留原圖面積的比例
+    rotation:
+      degrees: [10, 45]     # 隨機正負號
+    color:
+      brightness: [0.6, 1.4]
+      contrast: [0.6, 1.4]
+      saturation: [0.3, 1.7]
+      hue: [-0.1, 0.1]
+    jpeg:
+      quality: [5, 20]
+    blur:
+      radius: [2.0, 5.0]
+  phone:
+    dir: data/phone         # 組員自己拍的 100 張手機照片
+
+# ---------- 表示法 ----------
 models:
   clip:
     arch: ViT-B-16
@@ -17,23 +51,33 @@ models:
     pretrained: webli
   dinov2:
     arch: dinov2_vitb14
-    image_size: 224       # DINOv2 沒有固定輸入尺寸，以此為 scale = 1 的邊長
+    image_size: 224
+  phash:
+    hash_size: 8            # 8x8 = 64 bits
 
-multiscale:
-  scales: [0.707, 1.0, 1.414]
+tags:
+  model: clip               # proposal：CLIP's top-15 concept tags
+  vocab: imagenet1k         # 待解決：external class list。imagenet1k 或文字檔路徑（一行一個類別）
+  templates:
+    - "a photo of a {}."
+    - "a photo of the {}."
+    - "a close-up photo of a {}."
+    - "a photo of many {}."
+  top_n: 15
+  # BM25 文件的 term frequency：binary 每個 tag 出現一次；
+  # weighted 依 CLIP 機率重複 tag，讓 tf 與文件長度帶有信心資訊
+  tf_mode: weighted
+  tf_scale: 10
 
+bm25:
+  k1: 1.2
+  b: 0.75
+  k3: 8.0                   # query 端 tf 的飽和參數（weighted tag 的 query 也有 tf）
+
+# ---------- 檢索 ----------
 retrieval:
-  k: 100
-
-aqe:
-  n: 2
-  alpha: 3.0
-
-ensemble:
-  weights:
-    clip: 1.0
-    siglip: 1.0
-    dinov2: 1.0
+  k: 100                    # 每個階段的候選數，也是 demo 能翻到的深度
+  depth: 1000               # 評估時的 run 深度（trec_eval 預設 1000）
 
 index:
   hnsw:
@@ -41,21 +85,99 @@ index:
     ef_construction: 200
     ef_search: 128
   ivfpq:
-    nlist: 64
-    m: 64                 # 需整除 embedding 維度（CLIP 512、SigLIP / DINOv2 768）
+    nlist: 256              # 約 sqrt(40k) 的量級
+    m: 64                   # 需整除 embedding 維度（CLIP 512、SigLIP / DINOv2 768）
     nbits: 8
-    nprobe: 8
+    nprobe: 16
+  cp:                       # HW2 cluster pruning（Manning et al., IIR 7.1.6）
+    n_leaders: null         # null = round(sqrt(N))
+    b1: 1                   # 每個 follower 掛到最近的 b1 個 leader
+    b2: 4                   # query 時檢查最近的 b2 個 leader
 
-geometric:
-  max_side: 1024          # 抽 SIFT 前把長邊縮到此長度
-  max_keypoints: 2000
-  ratio_test: 0.8
-  ransac_threshold: 8.0   # 像素，以原圖座標計
-  min_inliers: 15         # inlier 數達此門檻才視為通過驗證
+aqe:
+  n: 3
+  alpha: 3.0
 
+rocchio:
+  alpha: 1.0
+  beta: 0.75
+  gamma: 0.15
+  feedback_depth: 10        # 評估時模擬使用者判斷前 10 名
+  rel_threshold: 1          # qrels 等級 >= 此值視為 relevant
+
+mmr:
+  lambda: 0.7               # 1.0 = 純相關度，越小越重視多樣性
+  depth: 100                # 只重排前 depth 名
+
+rrf:
+  k: 60
+
+# ---------- 評估 ----------
 eval:
+  semantic_max_grade: 2     # semantic 分級 = 共享類別數，上限 2（0 / 1 / 2）
+  num_threads: 1            # 量延遲時 FAISS 的執行緒數，讓各索引公平比較
+  latency_queries: 200      # 量延遲時取前幾個 query
+  experiments:
+    # 每個 query set 跑哪些 config_id（格式見 README 3.1）
+    coco_semantic: &core
+      - clip-flat-none
+      - siglip-flat-none
+      - dinov2-flat-none
+      - phash-flat-none
+      - bm25-inv-none
+      - clip+bm25-flat-none
+      - siglip+bm25-flat-none
+      - clip-flat-aqe
+      - siglip-flat-aqe
+      - clip-flat-rocchio
+      - siglip-flat-rocchio
+      - clip-flat-mmr
+      - siglip-flat-mmr
+      - siglip+bm25-flat-aqe+mmr
+    coco_semantic_box: [clip-flat-none, siglip-flat-none, dinov2-flat-none, clip-flat-rocchio, siglip-flat-rocchio, clip-flat-mmr, siglip-flat-mmr]
+    coco_semantic_box_full: [clip-flat-none, siglip-flat-none, dinov2-flat-none, clip-flat-rocchio, siglip-flat-rocchio, clip-flat-mmr, siglip-flat-mmr]
+    coco_similar:
+      - clip-flat-none
+      - siglip-flat-none
+      - dinov2-flat-none
+      - phash-flat-none
+      - bm25-inv-none
+      - dinov2-flat-aqe
+      - dinov2-hnsw-none
+      - dinov2-ivfpq-none
+      - dinov2-cp-none
+    holidays: [clip-flat-none, siglip-flat-none, dinov2-flat-none, phash-flat-none, dinov2-flat-aqe]
+    phone: *core
+    speed:                  # 索引比較：在 coco_semantic 與 coco_similar 上各跑一次
+      - clip-flat-none
+      - clip-hnsw-none
+      - clip-ivfpq-none
+      - clip-cp-none
+      - siglip-flat-none
+      - siglip-hnsw-none
+      - siglip-ivfpq-none
+      - siglip-cp-none
+      - dinov2-flat-none
+      - dinov2-hnsw-none
+      - dinov2-ivfpq-none
+      - dinov2-cp-none
+
+judging:
+  pool_depth: 10            # 每個系統取前 10 名進 pool
+  systems: [clip-flat-none, siglip-flat-none, dinov2-flat-none, phash-flat-none, bm25-inv-none, siglip+bm25-flat-none]
+  judges: [judge_a, judge_b]
+  grades: [0, 1, 2]         # 0 不相關、1 部分相關、2 相關
+  aggregate: min            # 兩位評審分數不同時取 min / max / mean（四捨五入）
+
+roxford:                    # supplementary run
+  datasets: [roxford5k, rparis6k]
+  models: [clip, siglip, dinov2, phash]
   protocols: [E, M, H]
   mp_ks: [1, 5, 10]
 
 demo:
-  n_show: 20              # 每組設定顯示的結果數
+  n_show: 20
+  default_gallery: coco40k
+  presets:                  # 依任務自動帶入的設定
+    semantic: siglip+bm25-flat-none
+    similar: dinov2-flat-none
