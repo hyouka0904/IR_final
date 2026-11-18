@@ -114,10 +114,11 @@ def list_sets(cache_root: str, kind: str | None = None) -> list[str]:
 # ---------------- qrels ----------------
 
 class Qrels:
-    """grades(qi) 回傳長度為圖庫大小的整數陣列（0 = 不相關）。"""
+    """grades(qi) 回傳長度為圖庫大小的整數陣列（0 = 不相關）；max_grade 為最高等級。"""
 
     n_queries: int
     n_docs: int
+    max_grade: int
 
     def grades(self, qi: int) -> np.ndarray:
         raise NotImplementedError
@@ -155,6 +156,7 @@ class SparseQrels(Qrels):
     def __init__(self, rels: list[dict[int, int]], n_docs: int):
         self.rels = rels
         self.n_queries, self.n_docs = len(rels), n_docs
+        self.max_grade = max((g for r in rels for g in r.values()), default=1)
 
     def grades(self, qi: int) -> np.ndarray:
         g = np.zeros(self.n_docs, dtype=np.int8)

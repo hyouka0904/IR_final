@@ -1,13 +1,13 @@
-# torch / torchvision / faiss 依 README 1.2 另外安裝（依 CUDA 版本而定）
-open_clip_torch>=2.23  # CLIP, SigLIP（需要 get_model_preprocess_cfg）
+# torch / torchvision / faiss-cpu 依 README 1.2 另外安裝（依 CUDA 版本而定）
+open_clip_torch>=2.23  # CLIP, SigLIP，以及 tag 詞彙表預設的 ImageNet-1k 類別名稱
 timm
-opencv-python>=4.5     # SIFT（4.4 版起已併入主套件）
-gradio>=4.0
+imagehash              # pHash baseline
+gradio>=4.0,<6
 numpy
 scipy
 pandas
-h5py                   # SIFT 特徵與 inlier 快取的存檔格式
 pyyaml
 tqdm
-matplotlib
 pillow
+pytest                 # 單元測試
+pytrec_eval-terrier    # 測試時驗證指標與 trec_eval 一致

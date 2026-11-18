@@ -1,6 +1,6 @@
 # HANDOFF
 
-> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-18（階段 2：離線腳本）
+> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-18（階段 3：demo、README）
 
 ## 任務目標
 
@@ -40,12 +40,20 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
   - `05_run_eval.py`：各 query set 的 summary / summary_by_edit / per_query / TREC run；`--speed` 跑索引比較（recall 損失、延遲、大小）
   - `06_human_judgments.py`：pool（盲標 CSV + HTML 對照表 + 另存系統來源）→ kappa → qrels
   - `07_roxford_supplementary.py`：bbx 裁切、revisitop compute_map
+- [x] 階段 3：demo、README、requirements
+  - `app/`：上傳（含剪貼簿 / webcam）或選 query set、框選、任務預設、並排比較、query tag 與命中 tag、Rocchio 勾選回饋、qrels 標記與單一 query 指標、failure analysis 分頁
+  - README 全面改寫成新題目（資料、config_id、流程、指標、執行順序、Rocchio 協定、人工標註流程、demo、目錄、狀態、分工）
+  - requirements：加 imagehash、pytest、pytrec_eval-terrier；移除 opencv、h5py、matplotlib
 
 ## 未完成
 
-- [ ] Gradio demo 改寫
-- [ ] README 改寫
-- [ ] requirements.txt 更新
+需要真實環境（torch、模型權重、資料集）才能做的：
+
+- [ ] 實際跑 `01 → 07`，確認 03 / 07 / demo 的線上抽特徵在真實模型上正常
+- [ ] 決定 tag 詞彙表（見待解決問題），換掉後要重跑 03（tags）、04、05
+- [ ] 拍 100 張手機照片放 `data/phone/`，跑 06 pool → 兩人標註 → kappa → qrels → `05 --queries phone`
+- [ ] 依實際結果調整超參數（IVF-PQ nlist/nprobe、cp b2、MMR λ、Rocchio β/γ、tf_scale）
+- [ ] 期末報告
 
 ## 重要決策
 
@@ -61,6 +69,9 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 - **pHash**：imagehash 64 bits，FAISS `IndexBinaryFlat`，分數 = 1 − hamming/64。
 - **Cluster pruning**：隨機 √N 個 leader、b1=1、b2=4，與 IVF 的差別是不做 k-means。
 - **延遲**：FAISS 執行緒數設為 1、全部 CPU；embed 延遲取自 03 腳本逐張量測。
+- **人工標註盲標**：`judgments.csv` 不含系統來源，來源另存 `pool_systems.csv`；pool 順序打亂；`pool` 不覆寫已存在的標註檔。合併方式預設 min（兩人都認為相關才算）。
+- **Demo 的 query 一律線上抽特徵**（即使來自 query set），延遲才是真實值；query set 的 query 會顯示 qrels 等級與前 K 名的 nDCG@10 / AP / RR（深度與評估的 1,000 不同，數值不能直接對照 summary）。
+- **Demo 事件一律用 `.input`**，避免程式更新元件時連鎖觸發重設（例如從 failure analysis 載入 query）。
 
 ## 待解決問題
 
@@ -75,6 +86,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 PYTHONPATH=<dir> python3 -m pytest -q -p no:cacheprovider tests
 ```
 
+- 階段 3：單元測試 **43 passed**；demo 以假特徵（stub torch、替換線上抽特徵）逐一呼叫事件處理函式：semantic+並排、Rocchio 回饋、box query＋使用者框選、Holidays（排除 query 本身）、上傳圖片、failure analysis、不合法設定的錯誤訊息都正常；實際 `launch()` 後 `/` 與 `/config` 回 200。
 - 階段 2：煙霧測試（假的 COCO / Holidays / phone 資料＋隨機特徵，代替需要 torch 的 03）：
   `02 → 04 → 05 → 05 --speed → 06 pool → （模擬兩位評審）→ 06 kappa → 06 qrels → 05 --queries phone` 全部跑通，
   輸出欄位正確；similar 的 query 向量 = 原圖 + 雜訊時，向量模型 mAP = 1，IVF-PQ / cp 有 recall 損失。產生假資料的程式在 scratchpad，未進 repo。
@@ -83,4 +95,5 @@ PYTHONPATH=<dir> python3 -m pytest -q -p no:cacheprovider tests
 
 ## 下一步
 
-改寫 Gradio demo，再改寫 README、更新 requirements.txt。
+程式部分已完成。下一步在有 GPU 的機器上依 README 第 4 節實際執行 01–07 與 demo，並處理「未完成」中列的項目。
+本 branch 尚未 push；sandbox 為 clone mode，host 端用 `git fetch sandbox-<name> feat/zero-shot-search` 取回。
