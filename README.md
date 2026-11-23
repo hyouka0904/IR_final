@@ -46,8 +46,13 @@ DINOv2 透過 `torch.hub` 載入，第一次執行時會自動下載權重；CLI
 
 ```bash
 python -c "import torch, faiss, open_clip, imagehash; print(torch.cuda.is_available(), faiss.__version__)"
-python -m pytest -q tests        # 單元測試，不需要 GPU、資料集與模型權重
+python -m pytest -q tests        # 單元測試＋冒煙測試，不需要 GPU、資料集與模型權重（約 10 秒）
+python -m pytest -q -m "not smoke"   # 只跑單元測試
 ```
+
+冒煙測試（`tests/test_smoke_pipeline.py`）用幾百張隨機圖片與隨機向量（取代 03），依序以子行程執行 02 → 04 → 05 → 05 --speed → 06 → check_data，確認腳本之間能銜接、輸出齊全。
+
+**CI**：每次 push 與 PR 都會由 GitHub Actions（`.github/workflows/ci.yml`）在 Ubuntu 與 Windows 上，以 Python 3.11 跑語法檢查、單元測試與冒煙測試。CI 只裝 `requirements-ci.txt`（不含 torch），所以 03、07 與 demo 的線上抽特徵不在 CI 範圍內，仍需在有 GPU 的機器上實際執行。部署（伺服器上的 demo）維持手動。
 
 ### 1.4 Windows
 

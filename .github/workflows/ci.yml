@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # 組員分別在 Linux 伺服器與 Windows 上開發，兩個平台都跑（換行、編碼、路徑分隔符號的問題都只在其中一邊出現）
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          pip install pytrec_eval-terrier || echo "::warning::pytrec_eval-terrier 安裝失敗，test_metrics 會略過與 trec_eval 的比對"
+
+      # 測試不會 import 的檔案（app/、需要 torch 的模組）至少確認沒有語法錯誤
+      - name: Syntax check
+        run: python -m compileall -q app scripts src tests
+
+      - name: Unit tests
+        run: python -m pytest -q -m "not smoke"
+
+      - name: Smoke test (02 → 04 → 05 → 06 → check_data on fake data)
+        run: python -m pytest -q -m smoke

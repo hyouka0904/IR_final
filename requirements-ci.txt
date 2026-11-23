@@ -1,0 +1,11 @@
+# CI 用：跑 tests/ 需要的套件。不含 torch、open_clip、timm、gradio（測試與冒煙測試都用不到，裝了只會拖慢 CI）
+# pytrec_eval-terrier 在 workflow 中另外安裝：沒有對應的 wheel 時允許失敗，test_metrics 會自動略過與它的比對
+numpy
+scipy
+pandas
+pyyaml
+tqdm
+pillow
+imagehash
+faiss-cpu
+pytest
