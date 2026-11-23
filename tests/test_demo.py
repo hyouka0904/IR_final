@@ -179,3 +179,50 @@ def test_hard_queries_label_names_the_semantic_task():
     assert "semantic" in hard_queries_label("semantic", "fusion")
     lab = hard_queries_label("similar", "dinov2")
     assert "semantic" in lab and "dinov2" in lab
+
+
+def test_run_search_index_rerank_and_choices(state):
+    from src.demo import run_search
+    from src.index import build_index
+    flat = state.engine.indexes["clip"]
+    state.engine.ann_indexes[("clip", "hnsw")] = build_index("hnsw", flat.vectors(), flat.ids, "ip",
+                                                             state.cfg)
+    items, _, timings, choices = run_search(state, solid(COLORS[1]), "semantic", "fusion", 3,
+                                            index="hnsw", rerank=["mmr"])
+    assert len(items) == 3 and "@hnsw" in timings and "+mmr" in timings
+    assert [label.split(" · ")[0] for label, _ in choices] == ["#1", "#2", "#3"]
+    assert all(isinstance(i, int) for _, i in choices)
+
+
+def test_rocchio_feedback_and_note(state):
+    from src.demo import run_search
+    _, _, timings, _ = run_search(state, solid(COLORS[1]), "semantic", "clip", 4, rerank=["rocchio"])
+    assert "no results marked" in timings
+    items, _, timings, choices = run_search(state, solid(COLORS[1]), "semantic", "clip", 4,
+                                            rerank=["rocchio"], feedback=([3], [1, 4]))
+    assert "+rocchio" in timings and len(items) == 4
+
+
+def test_evaluation_query_results_are_marked(cfg, state, tmp_path):
+    import json
+    from src.demo import run_search
+    data = tmp_path / "data"
+    data.mkdir()
+    cfg["paths"]["data"] = str(data)
+    (data / "gallery.json").write_text(json.dumps(
+        [{"image_id": i, "file_name": f"{i}.png", "categories": [i]} for i in COLORS]))
+    (data / "queries_semantic.json").write_text(json.dumps(
+        [{"image_id": 77, "file_name": "q.png", "categories": [1]}]))
+    items, _, timings, _ = run_search(state, solid(COLORS[1]), "semantic", "clip", 4, query_qid=77)
+    marks = {path.rsplit("/", 1)[-1].split(".")[0]: cap[0] for path, cap in items}
+    assert marks["1"] == "✓" and marks["2"] == "✗" and "evaluation query 77" in timings
+
+
+def test_launch_kwargs_host_port_auth(cfg):
+    from app.app import launch_kwargs
+    kw = launch_kwargs(cfg, host="0.0.0.0", port=8000, auth="me:secret:x")
+    assert kw["server_name"] == "0.0.0.0" and kw["server_port"] == 8000
+    assert kw["auth"] == ("me", "secret:x")
+    assert "auth" not in launch_kwargs(cfg)
+    with pytest.raises(SystemExit):
+        launch_kwargs(cfg, auth="no-colon")

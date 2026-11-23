@@ -92,6 +92,23 @@ class DemoState:
             state._user_files.pop(i, None)
         return state
 
+    def query_gains(self, qid: int) -> dict[int, float]:
+        """Graded semantic gain of every gallery image for one evaluation query (as evaluated)."""
+        from src.metrics import semantic_gains
+        if not hasattr(self, "_gallery_cats"):
+            root = resolve_path(self.cfg, "data")
+            gallery = read_manifest(root / "gallery.json") if (root / "gallery.json").exists() else []
+            queries = (read_manifest(root / "queries_semantic.json")
+                       if (root / "queries_semantic.json").exists() else [])
+            self._gallery_cats = ([r["image_id"] for r in gallery],
+                                  [set(r["categories"]) for r in gallery])
+            self._query_cats = {q["image_id"]: set(q["categories"]) for q in queries}
+        ids, cats = self._gallery_cats
+        qc = self._query_cats.get(int(qid))
+        if not qc:
+            return {}
+        return dict(zip(ids, semantic_gains(qc, cats).tolist()))
+
     def path_of(self, image_id: int) -> Path | None:
         """The image file for an id, or None if the demo doesn't know one."""
         image_id = int(image_id)
@@ -124,19 +141,25 @@ class DemoState:
         return image_id
 
 
-def search_handler(state: DemoState, image, task: str, rep: str,
-                   k: int) -> tuple[list[tuple[str, str]], str, str]:
-    """(gallery items (path, caption), query tags, timings or a ⚠ message)."""
+def run_search(state: DemoState, image, task: str, rep: str, k: int, index: str = "flat",
+               rerank=(), feedback=None, query_qid: int | None = None):
+    """(gallery items (path, caption), query tags, timings or a ⚠ message, result choices).
+    result choices = [(label, image id)] for marking results (Rocchio). query_qid: the semantic
+    evaluation query on screen (loaded from the hard-queries panel); its results are marked
+    ✓ (relevant under the evaluation's threshold) or ✗."""
     if image is None:
-        return [], "", "Upload a photo first."
+        return [], "", "Upload a photo first.", []
     try:
         with state.lock:
-            resp = state.engine.search(SearchRequest(image, task, int(k), rep))
+            resp = state.engine.search(SearchRequest(image, task, int(k), rep, index=index or "flat",
+                                                     rerank=tuple(rerank or ()), feedback=feedback))
     except ValueError as e:
-        return [], "", f"⚠ {e}"
+        return [], "", f"⚠ {e}", []
     except Exception as e:  # keep the UI alive; show what went wrong
-        return [], "", f"⚠ search failed ({type(e).__name__}): {e}"
-    items, missing = [], 0
+        return [], "", f"⚠ search failed ({type(e).__name__}): {e}", []
+    gains = state.query_gains(query_qid) if query_qid is not None else None
+    threshold = state.cfg["eval"]["semantic_binary_threshold"]
+    items, choices, missing = [], [], 0
     for r in resp.results:
         path = state.path_of(r.image_id)
         if path is None:
@@ -145,14 +168,30 @@ def search_handler(state: DemoState, image, task: str, rep: str,
         caption = f"#{r.rank} · {r.score:.3f}"
         if r.shared_tags:
             caption += " · " + ", ".join(r.shared_tags)
+        if gains is not None:
+            caption = ("✓ " if gains.get(r.image_id, 0.0) >= threshold else "✗ ") + caption
         items.append((str(path), caption))
+        choices.append((f"#{r.rank} · {r.image_id}", r.image_id))
     t = resp.timings_ms
-    timings = (f"{resp.representation}: embed {t['embed']:.0f} ms · search {t['search']:.1f} ms"
+    label = resp.representation + (f" @{resp.index}" if resp.index != "flat" else "") \
+        + "".join(f" +{x}" for x in resp.rerank)
+    timings = (f"{label}: embed {t['embed']:.0f} ms · search {t['search']:.1f} ms"
                f" · rerank {t['rerank']:.1f} ms")
     if missing:
         timings += (f" · ⚠ {missing} result{'s' if missing > 1 else ''} without an image file"
                     f" (is data/coco/gallery.json missing?)")
-    return items, ", ".join(resp.query_tags), timings
+    for note in resp.notes:
+        timings += f" · {note}"
+    if gains is not None:
+        timings += f" · evaluation query {query_qid}: ✓ relevant / ✗ not relevant"
+    return items, ", ".join(resp.query_tags), timings, choices
+
+
+def search_handler(state: DemoState, image, task: str, rep: str, k: int, index: str = "flat",
+                   rerank=(), feedback=None,
+                   query_qid: int | None = None) -> tuple[list[tuple[str, str]], str, str]:
+    """(gallery items (path, caption), query tags, timings or a ⚠ message)."""
+    return run_search(state, image, task, rep, k, index, rerank, feedback, query_qid)[:3]
 
 
 def add_handler(state: DemoState, image) -> str:

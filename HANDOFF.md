@@ -1,6 +1,6 @@
 # HANDOFF
 
-最後更新：2026-11-23（階段 3：評估）
+最後更新：2026-11-23（階段 4：demo）
 
 ## 任務目標
 
@@ -52,7 +52,13 @@
   - `scripts/07_judging.py`（pool / kappa / qrels，judgments.html、pool_systems.csv，CSV 用 utf-8-sig 讀，容忍 Excel 的 `2.0`）、`src/metrics.cohen_kappa`
   - `src/revisited.py` + `scripts/08_roxford.py`（bbx 裁切、revisitop compute_map、E / M / H mAP 與 mP@k）
   - `engine.index_dir`（索引大小）；makezip 打包 Holidays 圖與新 manifest
-- [ ] 階段 4：demo（zip 的 UI 為主）＋索引、重排、Rocchio 標記、並排比較、`--host` / `--auth`
+- [x] 階段 4：demo（zip 的版面不變，新增的控制項加在旁邊）
+  - 左欄：Representation 下方加 Index（依 `engine.index_kinds` 更新）與 Re-rank（aqe / mmr；tags、phash 時停用）
+  - 右欄：結果下方加「Rocchio feedback」accordion（勾選相關 / 不相關後重跑）、「Compare with another representation」accordion（並排比較，保留自舊版）
+  - 從 hard queries 載入的評估 query：結果標 ✓ / ✗（依評估的 threshold；保留自舊版的 qrels 標記），上傳新照片後清除
+  - 右上角「🌓 Light / dark」切換（使用者要求）：切換 `<body>` 的 `dark` class，記在 localStorage，沒選過時跟作業系統設定；Gradio 5 用 `Blocks(js=)`、Gradio 6 用 `launch(js=)`
+  - `app.py --host / --port / --auth user:pass（或 IR_DEMO_AUTH）/ --share`；`allowed_paths` 加 Holidays 資料夾；沒有任何 cache 時印出要先跑哪些腳本
+  - `src/demo.run_search`（回傳結果勾選清單）、`DemoState.query_gains`；`search_handler` 介面不變
 - [ ] 階段 5：Windows / Linux 建置說明（README 兩語）、CI、冒煙測試
 
 ## 重要決策
@@ -75,10 +81,11 @@ PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "n
 ```
 
 - 階段 0（匯入後未修改）：132 passed、1 failed（`test_resolve_device_cpu_passthrough` 需要 torch，sandbox 沒有）。
+- 階段 4：197 passed（test_demo 新增 index / rerank / Rocchio / ✓✗ 標記 / launch 參數）。以假 engine 實際 `launch()`：`/` 200、`--auth` 時未登入的 `/config` 401、設定裡有 theme JS；直接呼叫 UI 事件函式（search + compare、rocchio、on_task、on_rep、on_add）結果正確。沒有瀏覽器，dark mode 的實際畫面未目視確認。
 - 階段 3：193 passed（新增 `test_evaluate_extra.py`、`test_judging_revisited.py`）。05 / 07 / 08 的完整流程要等階段 5 的冒煙測試（假 encoder）才會實際跑過。
 - 階段 2：181 passed（新增 `test_download.py`（本機 HTTP server：接續、過小 / 過大檔案、check-only、全 0 封存檔重試、圖片檢查）、`test_integrity.py`、test_data 的 boxes / Holidays / box query / gallery_path）。另以假的 HTTP server 跑完整的 `01_download.py --with-roxford`：全新下載 → 製造損壞（截斷的圖庫圖、空的 Holidays 圖、刪掉的 ROxford 圖、被截斷且已改名的標註 zip、截斷的 val JSON）→ `--check-only` 不改任何檔案 → 修復 → 再 check 全部完整、沒有 .part；`check_data.py` passed 22 / skipped 7 / failed 0。
 - 階段 1：162 passed（新增 `test_index_kinds.py`、`test_engine_rerank.py`、re-ranker 與 SearchRequest 的測試）。zip 附的真實 cache（2,000 張 CLIP / DINOv2 / pHash）跑 `04_build_index.py --index flat cluster ivfpq hnsw` 成功（IVF-PQ 0.68 MB vs flat 3.9 MB）。
 
 ## 下一步
 
-階段 4：demo（zip 的 UI 為主，加入索引、重排、Rocchio 標記、並排比較、dark mode、`--host` / `--auth`）。
+階段 5：README（英文 + 繁中）的 Windows / Linux / 伺服器建置、CI workflow、冒煙測試（假 encoder 跑 01→08）。
