@@ -57,6 +57,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 
 ## 重要決策
 
+- **伺服器部署**（2026-11-23）：使用者改在 Linux 伺服器（GTX 1660 Ti 6 GB，driver CUDA 13.2）上建置，並透過區網 / VPN 開 demo。app 新增 `--auth 帳號:密碼`（或環境變數 `ZSIS_AUTH`），README 新增 4.4（`--host 0.0.0.0`、ufw、tmux）。CUDA 對照表註明 13.x 用 cu128。
 - **Demo 缺資料時的提示**（2026-11-23）：使用者還沒跑完 02–04 就開 demo，圖庫下拉選單是空的，按搜尋時 `Pipeline(None)` 丟出 TypeError。現在沒有圖庫時頁面頂端與終端機都會提示要先跑哪些腳本，搜尋時改成 gr.Error；特徵或索引檔缺少時（FileNotFoundError）也轉成 gr.Error，指出要跑 03 / 04。
 - **Demo 預設只綁 127.0.0.1**（2026-11-23）：原本 `server_name="0.0.0.0"`，Gradio 印出 `http://0.0.0.0:7860`，在 Windows 瀏覽器開會出現 ERR_ADDRESS_INVALID。改成 `--host`（預設 127.0.0.1）、`--port`、`--share` 參數。
 - **Windows 建置流程**（2026-11-23）：使用者在 Windows 上跑。README 新增 1.4（conda、PYTHONUTF8、torch CUDA 版本、faiss-cpu、路徑限制、常見問題）。程式面的修正：manifest 一律存 `/` 分隔的路徑（`rel_path` 用 `as_posix()`，cache 可在 Windows / Linux 間搬移），json 讀寫都指定 utf-8，judgments.html 的圖片路徑改用 `/`，讀 `judgments.csv` 用 `utf-8-sig`（Excel「CSV UTF-8」會加 BOM）。pytest、pytrec_eval-terrier 移到 `requirements-dev.txt`，在 Windows 若需要編譯而失敗，不會擋住主要套件的安裝。使用者照舊 README 用 `cu121` 裝到 torch 2.5.1，與 open_clip 4.x（需要 torch>=2.6）衝突；README 預設改成 `cu126`，並加上 nvidia-smi CUDA 版本 → wheel index 的對照表。

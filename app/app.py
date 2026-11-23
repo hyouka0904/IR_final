@@ -239,5 +239,10 @@ if __name__ == "__main__":
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=7860)
     p.add_argument("--share", action="store_true", help="產生 Gradio 的公開網址（給不在同一網段的人看）")
+    p.add_argument("--auth", default=os.environ.get("ZSIS_AUTH"),
+                   help="帳號:密碼，開放給區網 / VPN 時建議設定；也可以用環境變數 ZSIS_AUTH")
     args = p.parse_args()
-    build_app().launch(server_name=args.host, server_port=args.port, share=args.share)
+    auth = tuple(args.auth.split(":", 1)) if args.auth else None
+    if auth is not None and len(auth) != 2:
+        sys.exit("!! --auth 的格式是 帳號:密碼")
+    build_app().launch(server_name=args.host, server_port=args.port, share=args.share, auth=auth)

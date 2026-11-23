@@ -34,7 +34,7 @@ pip install -r requirements-dev.txt   # 單元測試用（選用）
 
 | `nvidia-smi` 顯示的 CUDA Version | `--index-url` 結尾 |
 |---|---|
-| ≥ 12.8 | `cu128` |
+| ≥ 12.8（含 13.x） | `cu128` |
 | 12.6、12.7 | `cu126` |
 | 12.4、12.5 | `cu124`，並指定版本：`pip install "torch==2.6.*" "torchvision==0.21.*" --index-url .../cu124` |
 | < 12.4 | 先更新 NVIDIA 驅動（`cu121` 最高只有 torch 2.5.1，不符合 open_clip 的要求） |
@@ -243,6 +243,34 @@ python scripts/05_run_eval.py --queries phone
 - **Rocchio 回饋**：勾選結果中相關與不相關的圖後，重新搜尋。
 - **Query set 的 query**：結果標示 qrels 等級，並顯示該 query 的 nDCG@10、AP、RR。
 - **Failure analysis 分頁**：依指標由低到高列出 query，點一下就載入到搜尋頁。
+
+
+### 4.4 在 Linux 伺服器上開放給區網 / VPN
+
+```bash
+# 1. 讓 demo 聽所有網路介面，並加上帳號密碼（Gradio 預設沒有登入保護）
+python app/app.py --host 0.0.0.0 --auth zsis:<密碼>
+
+# 2. 查伺服器的 IP。區網用 192.168.x.x 這類位址，VPN 用 VPN 介面的位址（例如 Tailscale 的 100.x.x.x）
+hostname -I
+
+# 3. 有開 ufw 的話，只對區網 / VPN 的網段開放 7860（網段依實際環境修改）
+sudo ufw allow from 192.168.0.0/16 to any port 7860 proto tcp
+sudo ufw allow in on tailscale0 to any port 7860 proto tcp     # 用 Tailscale 時
+```
+
+其他電腦開 `http://<伺服器 IP>:7860`。伺服器本機一樣開 `http://127.0.0.1:7860`。
+
+**SSH 登出後繼續執行**：用 tmux。
+
+```bash
+tmux new -s zsis                              # 進入 tmux 後
+conda activate zsis && cd <repo 路徑>
+python app/app.py --host 0.0.0.0 --auth zsis:<密碼>
+# 按 Ctrl+B 再按 D 離開，demo 繼續在背景執行；之後用 tmux attach -t zsis 回來
+```
+
+長時間的 `02`、`03` 也建議在 tmux 裡跑，SSH 斷線才不會中斷。
 
 ---
 
