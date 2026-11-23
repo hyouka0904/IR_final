@@ -1,6 +1,6 @@
 # HANDOFF
 
-最後更新：2026-11-23（階段 4：demo）
+最後更新：2026-11-23（階段 5：建置說明、CI、冒煙測試）
 
 ## 任務目標
 
@@ -59,7 +59,12 @@
   - 右上角「🌓 Light / dark」切換（使用者要求）：切換 `<body>` 的 `dark` class，記在 localStorage，沒選過時跟作業系統設定；Gradio 5 用 `Blocks(js=)`、Gradio 6 用 `launch(js=)`
   - `app.py --host / --port / --auth user:pass（或 IR_DEMO_AUTH）/ --share`；`allowed_paths` 加 Holidays 資料夾；沒有任何 cache 時印出要先跑哪些腳本
   - `src/demo.run_search`（回傳結果勾選清單）、`DemoState.query_gains`；`search_handler` 介面不變
-- [ ] 階段 5：Windows / Linux 建置說明（README 兩語）、CI、冒煙測試
+- [x] 階段 5：建置說明、CI、冒煙測試
+  - config `sources:`：所有下載網址（被擋時可換鏡像；冒煙測試用來指向本機 server）；03_tag 的詞表網址也讀這裡
+  - `tests/test_smoke.py`（marker `smoke`）：本機 HTTP server 提供假 COCO / Holidays / 詞表，假 encoder 取代 CLIP / SigLIP / DINOv2（pHash 用真的），in-process 跑 01 → check_data → 02 → 03 → 04（四種索引）→ 05 → 05 --experiments → 06 → search.py → 07 pool / kappa / qrels（模擬 Excel 的 BOM）→ 05 phone → check_data → demo build + 搜尋；不跑 08（需要 revisitop 程式碼）
+  - `.github/workflows/ci.yml`：Ubuntu + Windows、Python 3.12，compileall → 單元測試 → 冒煙測試；只裝 `requirements-ci.txt`（不含 torch）
+  - README / README.zh-TW：狀態、實驗與執行方式、目錄結構、快速開始（PyTorch 對照表、conda-forge、01–08、01 的檢查修復、Holidays FTP、手機照片標註流程）、Windows、Linux 伺服器（--host / --auth / tmux / ufw）、測試與 CI、壓縮檔、demo、時程
+  - proposal.md 補上 PDF 的 Demo 一行
 
 ## 重要決策
 
@@ -81,6 +86,7 @@ PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "n
 ```
 
 - 階段 0（匯入後未修改）：132 passed、1 failed（`test_resolve_device_cpu_passthrough` 需要 torch，sandbox 沒有）。
+- 階段 5：完整環境 197 passed + 冒煙 5 passed；只裝 `requirements-ci.txt` 的乾淨環境（沒有 torch）同樣 197 + 5 passed。冒煙測試的輸出檢查過：交叉表、experiments（含 Rocchio、ANN recall loss、index_mb）、pairs、kappa、phone 評估、check_data（39 passed / 2 skipped / 0 failed）都有實際數值。GitHub Actions 尚未實際跑過（branch 未 push）。
 - 階段 4：197 passed（test_demo 新增 index / rerank / Rocchio / ✓✗ 標記 / launch 參數）。以假 engine 實際 `launch()`：`/` 200、`--auth` 時未登入的 `/config` 401、設定裡有 theme JS；直接呼叫 UI 事件函式（search + compare、rocchio、on_task、on_rep、on_add）結果正確。沒有瀏覽器，dark mode 的實際畫面未目視確認。
 - 階段 3：193 passed（新增 `test_evaluate_extra.py`、`test_judging_revisited.py`）。05 / 07 / 08 的完整流程要等階段 5 的冒煙測試（假 encoder）才會實際跑過。
 - 階段 2：181 passed（新增 `test_download.py`（本機 HTTP server：接續、過小 / 過大檔案、check-only、全 0 封存檔重試、圖片檢查）、`test_integrity.py`、test_data 的 boxes / Holidays / box query / gallery_path）。另以假的 HTTP server 跑完整的 `01_download.py --with-roxford`：全新下載 → 製造損壞（截斷的圖庫圖、空的 Holidays 圖、刪掉的 ROxford 圖、被截斷且已改名的標註 zip、截斷的 val JSON）→ `--check-only` 不改任何檔案 → 修復 → 再 check 全部完整、沒有 .part；`check_data.py` passed 22 / skipped 7 / failed 0。
@@ -88,4 +94,9 @@ PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "n
 
 ## 下一步
 
-階段 5：README（英文 + 繁中）的 Windows / Linux / 伺服器建置、CI workflow、冒煙測試（假 encoder 跑 01→08）。
+程式部分完成。需要使用者 / 真實環境做的：
+
+- 伺服器：從 sandbox fetch `feat/ir-image-search`，在 Linux 伺服器建環境，跑 01（會沿用並修復舊 branch 下載的資料）→ 02 → 03 → 04 → 05，確認真實模型（open_clip SigLIP、timm DINOv2）與 08（revisitop）可以跑
+- 推到 GitHub 後看 CI（Windows 那邊最可能出問題）
+- 拍手機照片、兩人標註、kappa
+- 決定是否放大到 40k / 1,000 / 1,000（`data.*`），並調整 IVF-PQ / HNSW 參數

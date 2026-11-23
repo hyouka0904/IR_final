@@ -1,5 +1,7 @@
 # Zero-Shot Image-to-Image Search Engine
 
+(Transcribed from `team27_proposal.pdf`.)
+
 ## Introduction
 
 We build a zero-shot image-to-image search engine: a user uploads any photo, and the system ranks a gallery of about 40,000 everyday photos for two tasks. **Semantic search** finds the same kind of thing (your cat returns other cats). **Similar-image search** finds the same picture or scene (crops, edits, re-shots). Keyword search fails here: photos carry no text, and the two tasks define relevance differently. Building on ImgSearch, which has one notion of similarity and no evaluation, we ask: *which image representation suits which task?*
@@ -15,6 +17,7 @@ We build a zero-shot image-to-image search engine: a user uploads any photo, and
 - **Data:** a shared 40k MS-COCO 2017 gallery. Semantic queries: 1,000 val images, graded by shared categories. Similar queries: 1,000 edited gallery images plus INRIA Holidays.
 - **Evaluation:** trec_eval (nDCG@10, mAP; Recall@1/10, MRR); pooled human judgments on 100 phone photos (kappa); per-query AP for failure analysis; supplementary ROxford run.
 - **Engineering:** evaluation and demo share one pipeline.
+- **Demo:** 5–10 same-subject photo pairs; one joins the gallery, the other is the query, to confirm new images are reliably retrieved.
 
 ## Team members
 
