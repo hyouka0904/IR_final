@@ -35,22 +35,21 @@ GND_URL = "http://cmp.felk.cvut.cz/revisitop/data/datasets/{0}/gnd_{0}.pkl"
 
 
 def fetch(url: str, dst: Path) -> Path:
-    """下載到 dst；已存在且非空就跳過。先寫到 .part，完整下載後才改名。"""
+    """下載到 dst；已存在且非空就跳過。先寫到 .part，完整下載後才改名。
+
+    中斷後重跑會從 .part 的大小接續下載（FTP 用 REST、HTTP 用 Range），不會從頭來。
+    """
     if dst.exists() and dst.stat().st_size > 0:
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
     part = dst.with_name(dst.name + ".part")
-    print(f">> 下載 {url}", flush=True)
-    progress = Progress()
-    with open(part, "wb") as f:
-        if url.startswith("ftp://"):
-            _fetch_ftp(url, f, progress)
-        else:
-            with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
-                progress.total = int(r.headers.get("Content-Length") or 0)
-                while chunk := r.read(1 << 20):
-                    f.write(chunk)
-                    progress.add(len(chunk))
+    offset = part.stat().st_size if part.exists() else 0
+    print(f">> 下載 {url}" + (f"（從 {offset / 2**20:,.0f} MB 接續）" if offset else ""), flush=True)
+    progress = Progress(offset)
+    if url.startswith("ftp://"):
+        _fetch_ftp(url, part, progress)
+    else:
+        _fetch_http(url, part, progress)
     os.replace(part, dst)
     return dst
 
@@ -58,8 +57,8 @@ def fetch(url: str, dst: Path) -> Path:
 class Progress:
     """每 5% 印一行；不知道總大小時每 50 MB 印一行。"""
 
-    def __init__(self):
-        self.total, self.done, self.last = 0, 0, -1
+    def __init__(self, done: int = 0):
+        self.total, self.done, self.last = 0, done, -1
 
     def add(self, n: int) -> None:
         self.done += n
@@ -70,7 +69,21 @@ class Progress:
             print(mb + (f" / {self.total / 2**20:,.0f} MB ({self.done * 100 // self.total}%)" if self.total else ""), flush=True)
 
 
-def _fetch_ftp(url: str, f, progress: Progress) -> None:
+def _fetch_http(url: str, part: Path, progress: Progress) -> None:
+    req = urllib.request.Request(url)
+    if progress.done:
+        req.add_header("Range", f"bytes={progress.done}-")
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        if progress.done and r.status != 206:      # 伺服器不支援接續，從頭下載
+            progress.done = 0
+        progress.total = progress.done + int(r.headers.get("Content-Length") or 0) if r.headers.get("Content-Length") else 0
+        with open(part, "ab" if progress.done else "wb") as f:
+            while chunk := r.read(1 << 20):
+                f.write(chunk)
+                progress.add(len(chunk))
+
+
+def _fetch_ftp(url: str, part: Path, progress: Progress) -> None:
     """urllib 的 FTP 在資料連線被防火牆擋住時可能無限等待；ftplib 的 timeout 對控制與資料連線都有效。"""
     u = urllib.parse.urlparse(url)
     with ftplib.FTP(timeout=TIMEOUT) as ftp:
@@ -78,13 +91,15 @@ def _fetch_ftp(url: str, f, progress: Progress) -> None:
         ftp.login()
         ftp.voidcmd("TYPE I")
         progress.total = ftp.size(u.path) or 0
+        if progress.total and progress.done >= progress.total:     # .part 其實已經下載完
+            return
         print("   已連上 FTP，開始傳輸", flush=True)
+        with open(part, "ab" if progress.done else "wb") as f:
+            def write(chunk: bytes) -> None:
+                f.write(chunk)
+                progress.add(len(chunk))
 
-        def write(chunk: bytes) -> None:
-            f.write(chunk)
-            progress.add(len(chunk))
-
-        ftp.retrbinary(f"RETR {u.path}", write, blocksize=1 << 16)
+            ftp.retrbinary(f"RETR {u.path}", write, blocksize=1 << 16, rest=progress.done or None)
 
 
 def count_jpg(d: Path) -> int:

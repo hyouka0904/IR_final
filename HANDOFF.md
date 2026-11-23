@@ -57,6 +57,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 
 ## 重要決策
 
+- **Holidays 其實有在下載**（2026-11-23 更正）：使用者的 `data/holidays` 已有 991 MB，所以 FTP 沒被擋，只是舊版進度顯示在不知道總大小時（urllib FTP 沒有 Content-Length）一行都不印，看起來像卡住。新版用 FTP SIZE 取得總大小並正常顯示進度。另外加上**接續下載**：重跑時從 `.part` 的大小接續（FTP 用 REST、HTTP 用 Range，伺服器不支援 Range 就從頭），以本機假 FTP / HTTP server 測過接續、`.part` 已完整、從頭三種情況。
 - **Holidays FTP 卡住**（2026-11-23）：使用者在 Windows 與 Linux 伺服器上，01 都卡在 Holidays 的 FTP 下載（等了 30 分鐘）。urllib 的 FTP 在資料連線被擋時會無限等待，改用 ftplib（控制、資料連線都有 60 秒 timeout）。Holidays 下載失敗時只印提示並繼續（不再 sys.exit），新增 `--skip-holidays`。以本機假 FTP server 測過：卡住的情境 3 秒（測試用 timeout）後放棄，正常傳輸的檔案內容一致。
 - **程式碼流向**（2026-11-23）：sandbox 跑在使用者的 Linux 伺服器上。伺服器 host repo `git fetch sandbox-ir-final feat/zero-shot-search` → 在伺服器建置、開 demo（區網 / VPN）→ 伺服器 push 到 GitHub → Windows 從 GitHub pull。
 - **02 在 Windows 卡死**（2026-11-23）：`json.load` 整份 instances_train2017.json（約 450 MB）會因 segmentation polygon 吃掉數 GB 記憶體。`coco.load_instances` 改用 object_hook 在解析時丟掉 segmentation，只留需要的欄位，並存成 `instances_{split}.slim.json`，之後直接讀它。合成資料測試（243 MB、15 萬標註）峰值 1266 MB → 486 MB，重讀 0.5 秒。COCO 圖片下載加上 tqdm 進度條（原本 4 萬張下載期間沒有任何輸出，看起來像當掉）。README 的指令一律改用 `/`（使用者在 Linux 照抄 Windows 範例的 `scripts\01…` 失敗）。
