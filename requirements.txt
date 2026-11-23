@@ -9,5 +9,3 @@ pandas
 pyyaml
 tqdm
 pillow
-pytest                 # 單元測試
-pytrec_eval-terrier    # 測試時驗證指標與 trec_eval 一致

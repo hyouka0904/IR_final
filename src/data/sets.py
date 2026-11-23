@@ -58,9 +58,9 @@ class ImageSet:
 def rel_path(path: str | Path) -> str:
     p = Path(path).resolve()
     try:
-        return str(p.relative_to(ROOT))
+        return p.relative_to(ROOT).as_posix()
     except ValueError:
-        return str(p)
+        return p.as_posix()
 
 
 def save_set(cache_root: str, name: str, rows: list[dict], meta: dict) -> str:

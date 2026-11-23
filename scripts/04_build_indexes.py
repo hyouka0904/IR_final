@@ -65,7 +65,7 @@ def main():
             idx.save(text_index_path(cache, name))
             print(f">> {name} tags: {len(idx.vocabulary())} terms, 平均文件長度 {idx.avg_doc_len:.1f}")
         os.makedirs(os.path.join(cache, "indexes", name), exist_ok=True)
-        with open(os.path.join(cache, "indexes", name, "build_time.json"), "w") as f:
+        with open(os.path.join(cache, "indexes", name, "build_time.json"), "w", encoding="utf-8") as f:
             json.dump(build_time, f, indent=2)
 
 

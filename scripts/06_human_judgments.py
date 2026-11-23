@@ -79,7 +79,7 @@ def pool(cfg: dict, force: bool) -> None:
 
 def write_sheet(path: str, queries, df: pd.DataFrame) -> None:
     """靜態 HTML 對照表：左邊 query，右邊 pool 中的圖與 doc_id（順序與 CSV 相同，不顯示系統來源）。"""
-    rel = lambda p: os.path.relpath(ROOT / p, os.path.dirname(path))
+    rel = lambda p: Path(os.path.relpath(ROOT / p, os.path.dirname(path))).as_posix()
     parts = ["<!doctype html><meta charset=utf-8><title>Judging sheet</title>",
              "<style>body{font-family:sans-serif}td{vertical-align:top}img{max-height:160px;margin:2px}"
              "figure{display:inline-block;margin:4px;text-align:center;font-size:12px}</style><table>"]
@@ -93,7 +93,8 @@ def write_sheet(path: str, queries, df: pd.DataFrame) -> None:
 
 
 def load_judgments(cfg: dict) -> pd.DataFrame:
-    df = pd.read_csv(os.path.join(out_dir(cfg), "judgments.csv"), dtype={"query_id": str, "doc_id": str})
+    df = pd.read_csv(os.path.join(out_dir(cfg), "judgments.csv"), dtype={"query_id": str, "doc_id": str},
+                     encoding="utf-8-sig")             # Excel 另存「CSV UTF-8」會加 BOM
     a, b = cfg["judging"]["judges"]
     done = df[a].notna() & df[b].notna()
     if not done.all():
@@ -119,7 +120,7 @@ def kappa(cfg: dict) -> None:
         "confusion": pd.crosstab(df[a], df[b]).to_dict(),
     }
     path = os.path.join(out_dir(cfg), "kappa.json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, default=int)
     print(json.dumps({k: v for k, v in out.items() if k != "confusion"}, indent=2))
 

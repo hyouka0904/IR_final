@@ -13,7 +13,7 @@
 
 ### 1.1 系統需求
 
-- Linux（以 Ubuntu 22.04 測試）、Python 3.11
+- Linux（以 Ubuntu 22.04 測試）或 Windows 10 / 11（見 [1.4](#14-windows)），Python 3.11
 - NVIDIA GPU：只有抽特徵（`03`、`07`）時需要；評估與 demo 都可以只用 CPU
 - 硬碟：COCO 抽樣圖片約 7 GB、Holidays 約 2.5 GB；特徵與索引另外約 2 GB
 
@@ -29,6 +29,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install faiss-cpu
 
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # 單元測試用（選用）
 ```
 
 DINOv2 透過 `torch.hub` 載入，第一次執行時會自動下載權重；CLIP / SigLIP 權重由 open_clip 下載。
@@ -39,6 +40,65 @@ DINOv2 透過 `torch.hub` 載入，第一次執行時會自動下載權重；CLI
 python -c "import torch, faiss, open_clip, imagehash; print(torch.cuda.is_available(), faiss.__version__)"
 python -m pytest -q tests        # 單元測試，不需要 GPU、資料集與模型權重
 ```
+
+### 1.4 Windows
+
+所有腳本都是 Python，不需要 bash、WSL、curl、wget、unzip 或 tar。以下指令在 **PowerShell**（或 Anaconda PowerShell Prompt）執行。
+
+**1. 事前準備**
+
+- 安裝 [Miniconda](https://docs.conda.io/en/latest/miniconda.html)。若要在一般 PowerShell 用 conda，先執行一次 `conda init powershell` 再重開視窗。
+- 有 NVIDIA 顯卡時，先更新驅動，再用 `nvidia-smi` 查看右上角的 `CUDA Version`，決定下面 PyTorch 要裝的版本。
+- **repo 的位置**：路徑只用英數字（FAISS 讀寫索引時不支援中文路徑），也不要放在 OneDrive 同步的資料夾。「桌面」常被 OneDrive 同步，而資料加上 cache 超過 10 GB。建議放在 `C:\work\IR_final`、`D:\IR_final` 這類位置。
+- 不想把資料放在 repo 裡時，可以改 `configs/default.yaml` 的 `paths.data_root`、`paths.cache_root`。路徑請用斜線，例如 `D:/zsis/data`。
+
+**2. 建立環境**
+
+```powershell
+conda create -n zsis python=3.11 -y
+conda activate zsis
+
+# Windows 的 Python 預設用系統編碼（繁中是 cp950）讀寫檔案；改成 UTF-8，之後每次 activate 自動生效
+conda env config vars set PYTHONUTF8=1 HF_HUB_DISABLE_SYMLINKS_WARNING=1
+conda deactivate; conda activate zsis
+
+# PyTorch：cu121 / cu124 依 nvidia-smi 的 CUDA Version 選，不能高於它；沒有 NVIDIA 顯卡就拿掉 --index-url 那段，裝 CPU 版
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install faiss-cpu      # PyPI 有 Windows wheel；若安裝失敗改用 conda install -c pytorch faiss-cpu
+pip install -r requirements.txt
+pip install -r requirements-dev.txt   # 選用；pytrec_eval-terrier 若需要編譯而失敗，可以略過，不影響主流程
+```
+
+**3. 驗證**
+
+```powershell
+python -c "import torch, faiss, open_clip, imagehash; print(torch.__version__, torch.cuda.is_available(), faiss.__version__)"
+python -m pytest -q tests
+```
+
+有 NVIDIA 顯卡但第一個值印出 `False`，代表裝到 CPU 版的 torch。先 `pip uninstall torch torchvision`，再用正確的 `--index-url` 重裝。
+
+**4. 執行**
+
+與 [第 4 節](#4-執行順序) 相同，`scripts/` 用斜線或反斜線都可以：
+
+```powershell
+python scripts\01_download_data.py
+python scripts\02_prepare_data.py
+# ……03 → 05，與第 4 節相同
+python app\app.py
+```
+
+**常見問題**
+
+| 狀況 | 處理方式 |
+|---|---|
+| 01 的 Holidays 下載失敗 | 官方來源是 FTP，有些網路（例如校園網路）會擋。到 https://lear.inrialpes.fr/~jegou/data.php 手動下載 `jpg1.tar.gz`、`jpg2.tar.gz`，放到 `data\holidays\` 後重跑 01，會跳過下載直接解壓 |
+| 下載中斷 | 直接重跑，已完成的檔案會跳過（下載中的檔案以 `.part` 結尾，完成才改名） |
+| demo 啟動後打不開 `http://0.0.0.0:7860` | 瀏覽器請開 `http://localhost:7860`。Windows 防火牆跳出詢問時，只想本機使用可以按取消 |
+| 第一次跑 03 卡很久 | 正在下載 CLIP / SigLIP / DINOv2 權重（共數 GB），存在 `%USERPROFILE%\.cache` |
+| GPU 記憶體不足 | `python scripts\03_extract_features.py --batch-size 16`（或更小） |
+| 用 Excel 填 `judgments.csv` | 存檔時選「CSV UTF-8」或「CSV（逗號分隔）」都可以，06 都讀得到。不要改欄位名稱與順序 |
 
 ---
 

@@ -79,7 +79,7 @@ def extract_phash(image_iter, hash_size: int, timed: bool) -> tuple[np.ndarray, 
 
 
 def save_times(path: str, times: list[float], device: str) -> None:
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump({"device": device, "ms_per_image": float(np.mean(times)), "ms": times}, f)
 
 
@@ -87,7 +87,7 @@ def load_ms_per_image(cache_root: str, set_name: str, rep: str) -> float | None:
     p = time_path(cache_root, set_name, rep)
     if not os.path.exists(p):
         return None
-    with open(p) as f:
+    with open(p, encoding="utf-8") as f:
         return json.load(f)["ms_per_image"]
 
 
