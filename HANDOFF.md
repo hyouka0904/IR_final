@@ -1,6 +1,6 @@
 # HANDOFF
 
-最後更新：2026-11-23（階段 2：資料）
+最後更新：2026-11-23（階段 3：評估）
 
 ## 任務目標
 
@@ -45,9 +45,13 @@
   - `src/integrity.py` + `scripts/check_data.py`：.part、標註數量、manifest（數量、id 唯一、query 不在圖庫、box 類別、Holidays 每組 ≥ 2）、所有圖片可讀、ROxford gnd、cache / 索引 / tag 索引是否涵蓋整個圖庫、手機照片
   - `IR_CONFIG` 環境變數可指定 config（冒煙測試、CI 用）；預期的資料集大小放在 config 的 `integrity:`
   - 02_embed / demo / search.py 改用 `gallery_path`
-- [ ] 階段 3：評估
-  - 設定 = representation × index × rerank；Rocchio 模擬回饋＋frozen ranking；ANN 的 recall loss、索引大小
-  - Holidays、box query、手機照片人工標註（pool / kappa / qrels）、ROxford supplementary
+- [x] 階段 3：評估
+  - `src/evaluate.py` 改寫：設定標籤 `rep[@index][+reranker...]`（`config_label` / `parse_config`），共用 `run_query` / `run_config`（latency、索引大小、ANN 的 `recall_loss@10` 對 flat）；Rocchio 以 set 自己的相關性模擬使用者判斷前 `feedback_depth` 名，frozen ranking，latency 為兩輪總和
+  - query set：semantic（加 `coverage@10`，看 MMR 的多樣性）、box / box_full（binary，同一批 query 有無裁切）、similar（只從 COCO 圖選原圖）、holidays（排除 query 自己，mAP + recall@k + MRR）、phone（人工 qrels，0–2 分級）；保留 zip 的 `evaluate_semantic` / `evaluate_similar` 介面與欄位
+  - `scripts/05_evaluate.py`：預設 cross table（每個 representation、flat），`--configs`、`--experiments`（config 的 `eval.experiments`）、`--tasks`；summary 以 (task, config) 為鍵（舊的 summary.csv 沒有 config 欄也能讀）；FAISS 單執行緒量延遲
+  - `scripts/07_judging.py`（pool / kappa / qrels，judgments.html、pool_systems.csv，CSV 用 utf-8-sig 讀，容忍 Excel 的 `2.0`）、`src/metrics.cohen_kappa`
+  - `src/revisited.py` + `scripts/08_roxford.py`（bbx 裁切、revisitop compute_map、E / M / H mAP 與 mP@k）
+  - `engine.index_dir`（索引大小）；makezip 打包 Holidays 圖與新 manifest
 - [ ] 階段 4：demo（zip 的 UI 為主）＋索引、重排、Rocchio 標記、並排比較、`--host` / `--auth`
 - [ ] 階段 5：Windows / Linux 建置說明（README 兩語）、CI、冒煙測試
 
@@ -71,9 +75,10 @@ PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "n
 ```
 
 - 階段 0（匯入後未修改）：132 passed、1 failed（`test_resolve_device_cpu_passthrough` 需要 torch，sandbox 沒有）。
+- 階段 3：193 passed（新增 `test_evaluate_extra.py`、`test_judging_revisited.py`）。05 / 07 / 08 的完整流程要等階段 5 的冒煙測試（假 encoder）才會實際跑過。
 - 階段 2：181 passed（新增 `test_download.py`（本機 HTTP server：接續、過小 / 過大檔案、check-only、全 0 封存檔重試、圖片檢查）、`test_integrity.py`、test_data 的 boxes / Holidays / box query / gallery_path）。另以假的 HTTP server 跑完整的 `01_download.py --with-roxford`：全新下載 → 製造損壞（截斷的圖庫圖、空的 Holidays 圖、刪掉的 ROxford 圖、被截斷且已改名的標註 zip、截斷的 val JSON）→ `--check-only` 不改任何檔案 → 修復 → 再 check 全部完整、沒有 .part；`check_data.py` passed 22 / skipped 7 / failed 0。
 - 階段 1：162 passed（新增 `test_index_kinds.py`、`test_engine_rerank.py`、re-ranker 與 SearchRequest 的測試）。zip 附的真實 cache（2,000 張 CLIP / DINOv2 / pHash）跑 `04_build_index.py --index flat cluster ivfpq hnsw` 成功（IVF-PQ 0.68 MB vs flat 3.9 MB）。
 
 ## 下一步
 
-階段 3：評估（設定組合、Rocchio 協定、ANN recall loss、Holidays / box / phone / ROxford）。
+階段 4：demo（zip 的 UI 為主，加入索引、重排、Rocchio 標記、並排比較、dark mode、`--host` / `--auth`）。

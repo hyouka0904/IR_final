@@ -50,6 +50,7 @@ class SearchEngine:
         self._added: list[tuple[int, dict[str, np.ndarray]]] = []  # replayed into lazy indexes
         self._vectors: dict[str, tuple[np.ndarray, dict[int, int]]] = {}
         self._load_encoders = load_encoders
+        self._cache = None  # cache folder when loaded from_cache (index sizes on disk)
 
     @classmethod
     def from_cache(cls, cfg: dict, representations: list[str] | None = None) -> "SearchEngine":
@@ -70,6 +71,7 @@ class SearchEngine:
                 taggers[v] = Tagger.load(cache / v, cfg)
                 tag_indexes[v] = TagIndex.load(cache / v, k1, b)
         engine = cls(cfg, {}, indexes, load_encoders=True, taggers=taggers, tag_indexes=tag_indexes)
+        engine._cache = cache
         for rep in indexes:
             for kind in INDEX_KINDS[1:]:
                 if (cache / rep / kind / "meta.json").exists():
@@ -125,6 +127,14 @@ class SearchEngine:
                     index.add(vecs[rep], np.array([image_id]))
             self.ann_indexes[key] = index
         return self.ann_indexes[key]
+
+    def index_dir(self, rep: str, kind: str):
+        """The folder a saved index was loaded from, or None (built in memory)."""
+        if (rep, kind) in self._index_dirs:
+            return self._index_dirs[(rep, kind)]
+        if self._cache is not None and (self._cache / rep / kind / "meta.json").exists():
+            return self._cache / rep / kind
+        return None
 
     def gallery_ids(self, rep: str) -> set[int]:
         """Image ids that `rep` searches over."""

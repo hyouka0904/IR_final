@@ -99,6 +99,16 @@ rerank:                    # SearchRequest.rerank; works on clip / siglip / dino
 
 eval:
   semantic_binary_threshold: 0.5   # gain >= this counts as relevant for mAP
+  # scripts/05_evaluate.py --experiments: the planned experiments beyond the cross table
+  # (label = representation[@index][+reranker...], see src/evaluate.py)
+  experiments:
+    semantic: [fusion+aqe, fusion+mmr, fusion+rocchio, fusion+aqe+mmr, clip+aqe, clip+rocchio,
+               siglip+aqe, clip@cluster, clip@ivfpq, clip@hnsw, siglip@cluster, siglip@ivfpq,
+               siglip@hnsw, fusion@hnsw]
+    box: [fusion+mmr, clip+mmr]
+    box_full: [fusion+mmr, clip+mmr]
+    similar: [dinov2+aqe, dinov2+rocchio, dinov2@cluster, dinov2@ivfpq, dinov2@hnsw]
+    holidays: [dinov2+aqe, dinov2+rocchio, dinov2@hnsw]
 
 edits:
   crop_frac: 0.7
@@ -121,6 +131,18 @@ tags:                      # CLIP zero-shot tags -> HW1 inverted index
   variants:                # cache name -> sources whose only-from terms are dropped
     tags: []
     tags_nococo: [coco]
+
+judging:                   # scripts/07_judging.py: pooled human judgments of the phone photos
+  systems: [fusion, clip, siglip, dinov2, tags]   # pooled configurations (labels as in eval)
+  pool_depth: 10           # top results of each system that enter the pool
+  judges: [judge_a, judge_b]
+  grades: [0, 1, 2]        # 0 not relevant, 1 partly relevant, 2 relevant
+  aggregate: min           # combine the two judges: min / max / mean (rounded half up)
+
+roxford:                   # scripts/08_roxford.py: supplementary ROxford5k / RParis6k run
+  datasets: [roxford5k, rparis6k]
+  models: [clip, siglip, dinov2, phash]
+  mp_ks: [1, 5, 10]
 
 demo:                      # app/app.py (Gradio)
   host: 127.0.0.1

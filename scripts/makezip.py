@@ -52,7 +52,10 @@ def collect_files(root: Path, cfg: dict, tracked: list[str],
         gallery = root / data / "gallery.json"
         if gallery.exists():
             records = json.loads(gallery.read_text(encoding="utf-8"))
-            names |= {f"{data}/train2017/{r['file_name']}" for r in records}
+            holidays = cfg["paths"].get("holidays", "data/holidays")  # as src.data.gallery_path
+            names |= {f"{holidays}/jpg/{r['file_name']}" if r.get("source") == "holidays"
+                      else f"{data}/train2017/{r['file_name']}" for r in records}
+            names |= {f"{data}/{f}" for f in ("queries_box.json", "queries_holidays.json")}
         for rel in (f"{data}/val2017", cfg["paths"]["vocab"], cfg["pairs"]["dir"],
                     cfg["paths"]["cache"], f"{cfg['paths']['results']}/per_query"):
             names |= set(_files_under(root, rel))

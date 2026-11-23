@@ -52,3 +52,26 @@ def mean_ignore_nan(values: Sequence[float]) -> tuple[float, int]:
     finite = arr[np.isfinite(arr)]
     skipped = int(arr.size - finite.size)
     return (float(finite.mean()) if finite.size else float("nan")), skipped
+
+
+def cohen_kappa(a: Sequence, b: Sequence, weights: str | None = None) -> float:
+    """Agreement of two judges beyond chance. weights=None is Cohen's kappa; "linear" weights
+    disagreements by distance (suits the 0/1/2 grades)."""
+    a, b = np.asarray(a), np.asarray(b)
+    labels = np.union1d(a, b)
+    n = len(labels)
+    pos = {v: i for i, v in enumerate(labels)}
+    obs = np.zeros((n, n))
+    for x, y in zip(a, b):
+        obs[pos[x], pos[y]] += 1
+    obs /= obs.sum()
+    exp = np.outer(obs.sum(1), obs.sum(0))
+    if weights is None:
+        w = 1 - np.eye(n)
+    elif weights == "linear":
+        idx = np.arange(n)
+        w = np.abs(idx[:, None] - idx[None, :]) / max(n - 1, 1)
+    else:
+        raise ValueError(f"weights must be None or 'linear', got {weights!r}")
+    denom = (w * exp).sum()
+    return 1.0 if denom == 0 else float(1 - (w * obs).sum() / denom)
