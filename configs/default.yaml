@@ -16,6 +16,9 @@ models:
   clip:
     arch: ViT-B-32
     pretrained: laion2b_s34b_b79k
+  siglip:                   # second semantic model to compare against CLIP
+    arch: ViT-B-16-SigLIP
+    pretrained: webli
   dinov2:
     timm_name: vit_small_patch14_dinov2.lvd142m
     image_size: 224
@@ -31,10 +34,10 @@ preprocess:
 tasks:
   semantic:
     representation: fusion
-    allowed: [clip, dinov2, phash, tags, fusion, tags_nococo, fusion_nococo]
+    allowed: [clip, siglip, dinov2, phash, tags, fusion, tags_nococo, fusion_nococo]
   similar:
     representation: dinov2
-    allowed: [clip, dinov2, phash]
+    allowed: [clip, siglip, dinov2, phash]
 
 fusion:                    # RRF of the clip kNN line and the tag BM25 line
   rrf_k: 60
@@ -47,6 +50,34 @@ user:                      # demo photos added to the gallery
 search:
   k: 10
   eval_depth: 100
+
+index:                     # scripts/04_build_index.py --index flat cluster ivfpq hnsw
+  cluster:                 # HW2 cluster pruning (IIR 7.1.6)
+    leaders: null          # null = round(sqrt(N)) random leaders
+    b1: 1                  # each vector joins its b1 nearest leaders
+    b2: 4                  # a query scans the followers of its b2 nearest leaders
+  ivfpq:
+    nlist: null            # null = round(sqrt(N))
+    m: 32                  # sub-quantizers; divides 384 (DINOv2-S), 512 (CLIP B/32), 768 (SigLIP B/16)
+    nbits: 8
+    nprobe: 8
+  hnsw:
+    m: 32
+    ef_construction: 200
+    ef_search: 128
+
+rerank:                    # SearchRequest.rerank; works on clip / siglip / dinov2 / fusion*
+  aqe:                     # alpha-QE: q' = norm(q + sum_{i<n} max(s_i, 0)^alpha x_i)
+    n: 3
+    alpha: 3.0
+  rocchio:                 # q' = norm(alpha q + beta mean(rel) - gamma mean(nonrel))
+    alpha: 1.0
+    beta: 0.75
+    gamma: 0.15
+    feedback_depth: 10     # evaluation: simulated user judges the top 10 (frozen ranking)
+  mmr:
+    lambda: 0.7            # 1.0 = relevance only; lower = more diversity
+    depth: 100             # only the top `depth` results are re-ordered
 
 eval:
   semantic_binary_threshold: 0.5   # gain >= this counts as relevant for mAP

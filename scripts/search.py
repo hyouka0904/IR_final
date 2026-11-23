@@ -1,7 +1,8 @@
 """Search the gallery with one photo from the command line.
 
     python scripts/search.py PHOTO --task semantic|similar [--k 10] [--representation R]
-                             [--crop LEFT TOP RIGHT BOTTOM]
+                             [--crop LEFT TOP RIGHT BOTTOM] [--index flat|cluster|ivfpq|hnsw]
+                             [--rerank aqe mmr ...]
 """
 import argparse
 
@@ -11,7 +12,7 @@ from PIL import Image
 from src.config import load_config, resolve_path
 from src.data import read_manifest
 from src.pipeline import SearchEngine
-from src.schema import TASKS, SearchRequest
+from src.schema import INDEX_KINDS, RERANKERS, TASKS, SearchRequest
 
 
 def main():
@@ -22,6 +23,9 @@ def main():
     ap.add_argument("--k", type=int, default=cfg["search"]["k"])
     ap.add_argument("--representation")
     ap.add_argument("--crop", type=int, nargs=4)
+    ap.add_argument("--index", choices=INDEX_KINDS, default="flat")
+    ap.add_argument("--rerank", nargs="+", choices=[r for r in RERANKERS if r != "rocchio"],
+                    default=[], help="rocchio needs marked results; use the demo")
     args = ap.parse_args()
 
     root = resolve_path(cfg, "data")
@@ -29,8 +33,10 @@ def main():
     engine = SearchEngine.from_cache(cfg)
     with Image.open(args.photo) as img:
         resp = engine.search(SearchRequest(img, args.task, args.k, args.representation,
-                                           tuple(args.crop) if args.crop else None))
-    print(f"task={args.task} representation={resp.representation}")
+                                           tuple(args.crop) if args.crop else None,
+                                           index=args.index, rerank=tuple(args.rerank)))
+    print(f"task={args.task} representation={resp.representation} index={resp.index}"
+          + (f" rerank={'+'.join(resp.rerank)}" if resp.rerank else ""))
     if resp.query_tags:
         print("query tags: " + ", ".join(resp.query_tags))
     for r in resp.results:

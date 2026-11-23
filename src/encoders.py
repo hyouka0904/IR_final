@@ -1,4 +1,4 @@
-"""CLIP / DINOv2 / pHash behind one interface. Pre-trained weights only."""
+"""CLIP / SigLIP / DINOv2 / pHash behind one interface. Pre-trained weights only."""
 from typing import Protocol
 
 import imagehash
@@ -16,7 +16,10 @@ class Encoder(Protocol):
 def resolve_device(spec: str) -> str:
     if spec != "auto":
         return spec
-    import torch
+    try:
+        import torch
+    except ImportError:  # search-only installs (CI, the demo on a CPU box) have no torch
+        return "cpu"
     if torch.cuda.is_available():
         try:  # the wheel may not ship kernels for an old GPU
             (torch.ones(2, device="cuda") * 2).sum().item()
@@ -59,12 +62,15 @@ class _TorchEncoder:
 
 
 class ClipEncoder(_TorchEncoder):
+    """OpenCLIP image/text towers. SigLIP is loaded through the same class (name="siglip")."""
     name = "clip"
 
-    def __init__(self, arch: str, pretrained: str, device: str = "cpu", batch_size: int = 32):
+    def __init__(self, arch: str, pretrained: str, device: str = "cpu", batch_size: int = 32,
+                 name: str = "clip"):
         import open_clip
         model, _, transform = open_clip.create_model_and_transforms(arch, pretrained=pretrained)
         super().__init__(model, transform, device)
+        self.name = name
         self.tokenizer = open_clip.get_tokenizer(arch)
         self.batch_size = batch_size
 
@@ -105,7 +111,10 @@ def get_encoder(name: str, cfg: dict) -> Encoder:
     if name == "clip":
         return ClipEncoder(m["clip"]["arch"], m["clip"]["pretrained"], resolve_device(m["device"]),
                            cfg["embed"]["batch_size"])
+    if name == "siglip":
+        return ClipEncoder(m["siglip"]["arch"], m["siglip"]["pretrained"],
+                           resolve_device(m["device"]), cfg["embed"]["batch_size"], name="siglip")
     if name == "dinov2":
         return Dinov2Encoder(m["dinov2"]["timm_name"], m["dinov2"]["image_size"],
                              resolve_device(m["device"]))
-    raise ValueError(f"unknown representation {name!r}; expected clip, dinov2 or phash")
+    raise ValueError(f"unknown representation {name!r}; expected clip, siglip, dinov2 or phash")

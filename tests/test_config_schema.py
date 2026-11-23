@@ -18,10 +18,13 @@ def test_load_config_has_required_keys():
     assert cfg["embed"]["batch_size"] == 32
     assert cfg["preprocess"]["max_side"] == 512
     assert cfg["tasks"]["semantic"]["representation"] == "fusion"
-    assert cfg["tasks"]["semantic"]["allowed"] == ["clip", "dinov2", "phash", "tags", "fusion",
-                                                   "tags_nococo", "fusion_nococo"]
+    assert cfg["tasks"]["semantic"]["allowed"] == ["clip", "siglip", "dinov2", "phash", "tags",
+                                                   "fusion", "tags_nococo", "fusion_nococo"]
     assert cfg["tasks"]["similar"]["representation"] == "dinov2"
-    assert cfg["tasks"]["similar"]["allowed"] == ["clip", "dinov2", "phash"]
+    assert cfg["tasks"]["similar"]["allowed"] == ["clip", "siglip", "dinov2", "phash"]
+    assert cfg["models"]["siglip"] == {"arch": "ViT-B-16-SigLIP", "pretrained": "webli"}
+    assert set(cfg["index"]) == {"cluster", "ivfpq", "hnsw"}
+    assert set(cfg["rerank"]) == {"aqe", "rocchio", "mmr"}
     assert cfg["fusion"] == {"rrf_k": 60, "depth": 100}
     assert cfg["user"] == {"dir": "data/user", "first_id": 1000000000}
     assert cfg["bm25"] == {"k1": 1.2, "b": 0.75}
@@ -52,3 +55,13 @@ def test_schema_types_construct():
     resp = SearchResponse(results=[SearchResult(image_id=1, score=0.5, rank=1)],
                           representation="dinov2", timings_ms={"embed": 1.0})
     assert resp.results[0].rank == 1
+
+
+def test_search_request_index_and_rerank():
+    img = Image.new("RGB", (4, 4))
+    req = SearchRequest(image=img, task="semantic", index="hnsw", rerank=("mmr", "aqe"))
+    assert req.rerank == ("aqe", "mmr")  # normalized to the fixed order
+    with pytest.raises(ValueError):
+        SearchRequest(image=img, task="semantic", index="lsh")
+    with pytest.raises(ValueError):
+        SearchRequest(image=img, task="semantic", rerank=("bogus",))

@@ -1,6 +1,6 @@
 """Step 2: embed every gallery image with each representation.
 
-    python scripts/02_embed.py --models clip dinov2 phash
+    python scripts/02_embed.py --models clip siglip dinov2 phash
 Writes cache/<rep>/vectors.npy and cache/<rep>/ids.npy.
 """
 import argparse

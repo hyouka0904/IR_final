@@ -1,112 +1,72 @@
 # HANDOFF
 
-> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-23（01 改為跨平台 Python 腳本）
+最後更新：2026-11-23（階段 1：引擎擴充）
 
 ## 任務目標
 
-依新版一頁 proposal（`proposal.md`，Zero-Shot Image-to-Image Search Engine）改寫整個 repo：
-README、proposal、source code。舊題目（ROxford 地標檢索的失敗模式分析）只保留 ROxford 當 supplementary run。
+使用者提供組員的 `ir_image_search-20261123.zip`，要求：
 
-- 工作位置：worktree `../ir-final-zeroshot`，branch `feat/zero-shot-search`（從 `main` 的 `acae01b` 分出）
-- 不在 `main` 上 commit
-- sandbox 是 clone mode：commit 留在 sandbox 內，host 需要 `git fetch sandbox-<name>` 取回
+- **以這包為主軸重新開發**：功能重疊的部分以它為準，UI 以它為準。
+- **我們多做的功能保留**（來自上一版 `feat/zero-shot-search`）。
+- 一樣要能在 **Windows、Linux** 上建置網頁；**CI**；**檢查資料完整性**。
+- **把功能都實作出來**：zip 的 README / proposal 中列為 planned 的項目全部完成。
 
-## 使用者已確認的決定
+## 工作位置
 
-1. worktree `../ir-final-zeroshot`、branch `feat/zero-shot-search`
-2. 舊程式：保留 ROxford 資料讀取與 revisitop 評估當 supplementary；刪除 SIFT/RANSAC、inlier 快取、multi-scale、96 組 grid
-3. `proposal.md` 直接替換成 PDF 內容（不擴寫）
-4. HW1 inverted index、HW2 BM25、HW2 cluster pruning 在 repo 內重新實作，完整程度依設計需求決定
-5. tag 用的 external class list：**未指定，列為待解決問題**（暫用可替換的預設）
-6. 資料切分照預設（見 README）
-7. 人工標註：proposal 有寫（pooled human judgments on 100 phone photos, kappa）。只提供 pooling 與 kappa／qrels 腳本，標註由組員用 CSV 人工完成，不做標註介面
-8. README 改新題目；本機資料夾名稱不改
+- worktree：`/home/user/projects/ir-final-upstream`，branch `feat/ir-image-search`（從 `feat/zero-shot-search` 分出，第一個 commit 以 zip 內容取代舊程式）。
+- 舊版程式在 `feat/zero-shot-search`（worktree `../ir-final-zeroshot`），移植功能時參考。使用者的 Linux 伺服器目前用的是舊 branch（正在下載資料）。
+- 程式碼流向：sandbox → Linux 伺服器（`git fetch sandbox-ir-final`，建置、開 demo）→ GitHub → Windows。
 
-## 已完成
+## zip 的架構（以它為準）
 
-- [x] 階段 0：建 worktree、替換 `proposal.md`、建立本文件
-- [x] 階段 1：核心模組＋單元測試
-  - `configs/default.yaml`：新題目的全部超參數與各 query set 的實驗清單
-  - 資料層：`src/data/sets.py`（manifest、CategoryQrels、SparseQrels）、`coco.py`、`holidays.py`、`edits.py`；`scripts/01_download_data.py`、`02_prepare_data.py`
-  - 表示法：`src/models/encoders.py`（改用各模型官方前處理）、`phash.py`、`tagger.py`、`names.py`；`src/features.py`
-  - 文字檢索：`src/text/inverted_index.py`（HW1，含布林 AND/OR 與 forward index）、`bm25.py`（HW2）
-  - 索引：`src/index/cluster_pruning.py`（HW2）、`faiss_index.py`（加 cp 與 pHash 二元索引）
-  - 後處理：`src/rerank/rocchio.py`、`mmr.py`、`rrf.py`（`aqe.py` 沿用）
-  - `src/pipeline.py`、`src/schema.py` 改寫；`src/eval/metrics.py`（trec_eval 定義）、`trec.py`、`protocol.py`、`revisited_eval.py`
-  - 刪除：SIFT/RANSAC、multi-scale、舊的 02–05 腳本、inlier 視覺化、舊困難 query 元件
-- [x] 階段 2：離線腳本 03–07
-  - `03_extract_features.py`：向量（圖庫 batch、query 逐張計時）、pHash、CLIP tag
-  - `04_build_indexes.py`：各圖庫的 flat/hnsw/ivfpq/cp、pHash flat、tag inverted index，並記錄建立時間
-  - `05_run_eval.py`：各 query set 的 summary / summary_by_edit / per_query / TREC run；`--speed` 跑索引比較（recall 損失、延遲、大小）
-  - `06_human_judgments.py`：pool（盲標 CSV + HTML 對照表 + 另存系統來源）→ kappa → qrels
-  - `07_roxford_supplementary.py`：bbx 裁切、revisitop compute_map
-- [x] 階段 3：demo、README、requirements
-  - `app/`：上傳（含剪貼簿 / webcam）或選 query set、框選、任務預設、並排比較、query tag 與命中 tag、Rocchio 勾選回饋、qrels 標記與單一 query 指標、failure analysis 分頁
-  - README 全面改寫成新題目（資料、config_id、流程、指標、執行順序、Rocchio 協定、人工標註流程、demo、目錄、狀態、分工）
-  - requirements：加 imagehash、pytest、pytrec_eval-terrier；移除 opencv、h5py、matplotlib
+- `src/pipeline.py` `SearchEngine`：representation（clip / dinov2 / phash / tags / fusion / tags_nococo / fusion_nococo）、`tasks.<task>.allowed`、`add_image`（demo 加圖）。
+- `src/sparse/`：HW1 postings 格式 + HW2 BM25（與 HW2 `weighting.py` parity test）。
+- `src/tagging.py`：COCO + Open Images + Places365 詞彙表、softmax tf、`_nococo` 洩漏消融。
+- `src/demo.py` + `app/app.py`：Gradio（ImageEditor 裁切、task、representation、k、query tags、加入圖庫、hard queries）。
+- `src/pairs.py` / `scripts/06_pairs.py`：同主題照片對。
+- `scripts/makezip.py`：打包給組員。
+- 資料：`data/coco/{gallery,queries_semantic}.json` manifest，`cache/<rep>/{vectors,ids}.npy`、`cache/<rep>/flat/`、`cache/tags*/`。
+- 程式風格：英文註解、README 有英文與繁中兩版。
 
-## 未完成
+## 要移植 / 實作的功能（計畫）
 
-需要真實環境（torch、模型權重、資料集）才能做的：
-
-- [ ] 實際跑 `01 → 07`，確認 03 / 07 / demo 的線上抽特徵在真實模型上正常
-- [ ] 決定 tag 詞彙表（見待解決問題），換掉後要重跑 03（tags）、04、05
-- [ ] 拍 100 張手機照片放 `data/phone/`，跑 06 pool → 兩人標註 → kappa → qrels → `05 --queries phone`
-- [ ] 依實際結果調整超參數（IVF-PQ nlist/nprobe、cp b2、MMR λ、Rocchio β/γ、tf_scale）
-- [ ] 期末報告
+- [x] 階段 1：引擎擴充
+  - SigLIP：`ClipEncoder(name="siglip")`（open_clip ViT-B-16-SigLIP / webli），兩個任務都允許
+  - `src/index.py`：`FlatIndex`（原本的）、`ClusterPruningIndex`（HW2，√N 隨機 leader、b1 / b2）、`FaissANNIndex`（ivfpq / hnsw），共用介面（ntotal、ids、kind、add、search、save、load）；`build_index` / `load_index`（舊的 flat meta.json 沒有 kind 也能讀）；存在 `cache/<rep>/<kind>/`
+  - `src/rerank.py`：`alpha_qe`、`rocchio`、`mmr`
+  - `SearchRequest.index` / `rerank` / `feedback`；`SearchResponse.index` / `rerank` / `notes`
+  - `SearchEngine`：`index_kinds(rep)`、`index_for(rep, kind)`（非 flat 的索引第一次用到才載入，載入時補上之前 demo 加入的圖）、`vectors_of`（從 flat 索引 reconstruct，re-ranker 用）、`_rerank`（aqe → rocchio → mmr，時間計入 rerank；aqe / rocchio 會重新檢索）；fusion 的 ANN 與 re-rank 作用在 clip 那條線；tags / phash 用 ANN 或 re-rank 會丟 ValueError
+  - `scripts/04_build_index.py --index flat cluster ivfpq hnsw`，寫 `cache/<rep>/build.json`（建置時間、大小）；`scripts/search.py --index --rerank`
+  - `resolve_device` 在沒有 torch 時回傳 cpu（CI、只跑搜尋的環境）
+- [ ] 階段 2：資料
+  - 01 自動下載標註（接續下載、大小檢查）、Holidays（併入圖庫）、ROxford / RParis
+  - box query（意圖消歧）
+  - 資料完整性檢查（`scripts/check_data.py`）
+- [ ] 階段 3：評估
+  - 設定 = representation × index × rerank；Rocchio 模擬回饋＋frozen ranking；ANN 的 recall loss、索引大小
+  - Holidays、box query、手機照片人工標註（pool / kappa / qrels）、ROxford supplementary
+- [ ] 階段 4：demo（zip 的 UI 為主）＋索引、重排、Rocchio 標記、並排比較、`--host` / `--auth`
+- [ ] 階段 5：Windows / Linux 建置說明（README 兩語）、CI、冒煙測試
 
 ## 重要決策
 
-- **CI（只做 CI，不做 CD）**（2026-11-23）：`.github/workflows/ci.yml`，Ubuntu + Windows、Python 3.11，步驟為 compileall、`pytest -m "not smoke"`、`pytest -m smoke`。只裝 `requirements-ci.txt`（不含 torch / open_clip / timm / gradio）；pytrec_eval-terrier 另外裝、失敗只發警告。冒煙測試 `tests/test_smoke_pipeline.py` + `tests/smoke/fake_data.py`（假 COCO / Holidays / phone、假特徵取代 03），以子行程跑 02 → 04 → 05 → 05 --speed → 06（模擬兩位評審、以 utf-8-sig 存檔）→ 05 phone → check_data。不做 CD 的理由：伺服器在區網 / VPN 後面（要 self-hosted runner，公開 repo 有執行 PR 程式碼的風險）、部署只是 pull + 重啟、報告前需要可控、程式碼流向是 sandbox → 伺服器 → GitHub。驗證：只裝 requirements-ci.txt 的乾淨環境（Python 3.14，無 pytrec）單元 54 passed、冒煙 5 passed；完整環境 64 passed、5 skipped。workflow 尚未在 GitHub 上實際跑過（branch 未 push）。
-- **資料完整性檢查**（2026-11-23）：`src/data/integrity.py` + `scripts/check_data.py` + `tests/test_data_integrity.py`。圖片預設做快速檢查（PIL 讀檔頭；JPEG 檢查結尾 EOI 標記，缺少時再完整解碼，避免把結尾有額外資料的正常 JPEG 誤判），`--full` 每張完整解碼。ROxford / RParis 只檢查 gnd 的 imlist + qimlist（RParis 封存檔內有 20 張損毀圖不在 imlist）。選用資料集未下載時為 skip。pytest 的真實資料測試在資料不存在時自動 skip。驗證：單元測試 59 passed、5 skipped（真實資料不存在）；以煙霧測試資料跑 02 → check_data，sets 全數通過，截斷一張圖庫圖片後正確抓到並回傳結束碼 1。
-- **下載完整性檢查**（2026-11-23）：知道總大小時，下載完會比對檔案大小，不符就不改名（保留 .part，重跑接續）；HTTP 416（.part 不小於檔案）時丟掉 .part 從頭下載；tar 解壓失敗時刪除封存檔並請使用者重跑。以本機假 HTTP server 測過 Range 接續、416、連線提早結束後接續、損毀封存檔。
-- **Holidays 其實有在下載**（2026-11-23 更正）：使用者的 `data/holidays` 已有 991 MB，所以 FTP 沒被擋，只是舊版進度顯示在不知道總大小時（urllib FTP 沒有 Content-Length）一行都不印，看起來像卡住。新版用 FTP SIZE 取得總大小並正常顯示進度。另外加上**接續下載**：重跑時從 `.part` 的大小接續（FTP 用 REST、HTTP 用 Range，伺服器不支援 Range 就從頭），以本機假 FTP / HTTP server 測過接續、`.part` 已完整、從頭三種情況。
-- **Holidays FTP 卡住**（2026-11-23）：使用者在 Windows 與 Linux 伺服器上，01 都卡在 Holidays 的 FTP 下載（等了 30 分鐘）。urllib 的 FTP 在資料連線被擋時會無限等待，改用 ftplib（控制、資料連線都有 60 秒 timeout）。Holidays 下載失敗時只印提示並繼續（不再 sys.exit），新增 `--skip-holidays`。以本機假 FTP server 測過：卡住的情境 3 秒（測試用 timeout）後放棄，正常傳輸的檔案內容一致。
-- **程式碼流向**（2026-11-23）：sandbox 跑在使用者的 Linux 伺服器上。伺服器 host repo `git fetch sandbox-ir-final feat/zero-shot-search` → 在伺服器建置、開 demo（區網 / VPN）→ 伺服器 push 到 GitHub → Windows 從 GitHub pull。
-- **02 在 Windows 卡死**（2026-11-23）：`json.load` 整份 instances_train2017.json（約 450 MB）會因 segmentation polygon 吃掉數 GB 記憶體。`coco.load_instances` 改用 object_hook 在解析時丟掉 segmentation，只留需要的欄位，並存成 `instances_{split}.slim.json`，之後直接讀它。合成資料測試（243 MB、15 萬標註）峰值 1266 MB → 486 MB，重讀 0.5 秒。COCO 圖片下載加上 tqdm 進度條（原本 4 萬張下載期間沒有任何輸出，看起來像當掉）。README 的指令一律改用 `/`（使用者在 Linux 照抄 Windows 範例的 `scripts\01…` 失敗）。
-- **伺服器部署**（2026-11-23）：使用者改在 Linux 伺服器（GTX 1660 Ti 6 GB，driver CUDA 13.2）上建置，並透過區網 / VPN 開 demo。app 新增 `--auth 帳號:密碼`（或環境變數 `ZSIS_AUTH`），README 新增 4.4（`--host 0.0.0.0`、ufw、tmux）。CUDA 對照表註明 13.x 用 cu128。
-- **Demo 缺資料時的提示**（2026-11-23）：使用者還沒跑完 02–04 就開 demo，圖庫下拉選單是空的，按搜尋時 `Pipeline(None)` 丟出 TypeError。現在沒有圖庫時頁面頂端與終端機都會提示要先跑哪些腳本，搜尋時改成 gr.Error；特徵或索引檔缺少時（FileNotFoundError）也轉成 gr.Error，指出要跑 03 / 04。
-- **Demo 預設只綁 127.0.0.1**（2026-11-23）：原本 `server_name="0.0.0.0"`，Gradio 印出 `http://0.0.0.0:7860`，在 Windows 瀏覽器開會出現 ERR_ADDRESS_INVALID。改成 `--host`（預設 127.0.0.1）、`--port`、`--share` 參數。
-- **Windows 建置流程**（2026-11-23）：使用者在 Windows 上跑。README 新增 1.4（conda、PYTHONUTF8、torch CUDA 版本、faiss-cpu、路徑限制、常見問題）。程式面的修正：manifest 一律存 `/` 分隔的路徑（`rel_path` 用 `as_posix()`，cache 可在 Windows / Linux 間搬移），json 讀寫都指定 utf-8，judgments.html 的圖片路徑改用 `/`，讀 `judgments.csv` 用 `utf-8-sig`（Excel「CSV UTF-8」會加 BOM）。pytest、pytrec_eval-terrier 移到 `requirements-dev.txt`，在 Windows 若需要編譯而失敗，不會擋住主要套件的安裝。使用者照舊 README 用 `cu121` 裝到 torch 2.5.1，與 open_clip 4.x（需要 torch>=2.6）衝突；README 預設改成 `cu126`，並加上 nvidia-smi CUDA 版本 → wheel index 的對照表。
-- **01 下載改用 Python**（2026-11-23）：使用者在 Windows PowerShell 執行 `bash scripts/01_download_data.sh` 失敗（`set: pipefail` 無效，CRLF 換行造成），且 Windows 通常沒有 curl/wget/unzip/tar 的 bash 環境。改成 `scripts/01_download_data.py`，只用標準函式庫（urllib、zipfile、tarfile）；ROxford / RParis 也自己下載攤平（revisitop 的 download.py 用 `os.system('wget …')`，Windows 不能用），revisitop 程式碼改下載 GitHub zip，不需要 git。02 / 04 / 05 / 07 缺前置資料時改成印出明確訊息並結束（原本 04 / 05 什麼都不印、07 直接 traceback）。
-
-- **config_id = `{method}-{index}-{post}`**：method ∈ clip / siglip / dinov2 / phash / bm25 / {向量模型}+bm25；index ∈ flat / hnsw / ivfpq / cp（bm25 單獨時為 inv，phash 只有 flat）；post 為 none 或 aqe / rocchio / mmr 以 + 串接。不跑完整網格，每個 query set 跑哪些設定寫在 `eval.experiments`。
-- **指標自己算、與 trec_eval 定義一致**：semantic qrels 展開後會有上千萬列（person 出現在約一半的 COCO 圖），所以只存類別矩陣（`CategoryQrels`）並在 numpy 上計算。`tests/test_metrics.py` 以 pytrec_eval 逐 query 驗證一致；`src/eval/trec.py` 可輸出 run / qrels 給官方 trec_eval 交叉驗證。
-- **Semantic 分級**：共享類別數，上限 2（0/1/2），作為 nDCG 的 gain。只抽有標註的圖。
-- **Box query（意圖消歧）**：從含 ≥2 類別的 semantic query 中選一個面積 ≥5% 的物件框起來，qrels 只看該類別；另有不裁切的 `coco_semantic_box_full` 對照組共用 qrels。裁切走與 demo 框選相同的 `crop_user_box`。
-- **MMR 的多樣性指標**：nDCG 看不出多樣性，另外算 `cat_coverage_10`（前 10 名涵蓋 query 幾成類別）。
-- **Rocchio 評估**：以 qrels 模擬使用者判斷前 10 名，並用 frozen ranking（已判斷的前 10 名不動，只重排其後），避免把使用者已看過的答案算成進步。
-- **Similar query**：1,000 張圖庫圖片平均分配 5 種 edit（各 200 張），每張只套一種；JPEG 以外都存 PNG，避免壓縮失真混入。rotation 不擴大畫布、四角補黑。
-- **Holidays**：獨立圖庫（`holidays_db`），500 個 query 在圖庫內，評估時以 `exclude_idx` 排除 query 本身。
-- **BM25 文件**：一個 tag 就是一個 term；`tf_mode: weighted` 時 tf = max(1, round(10 × CLIP 機率))。用 binary 的話所有文件長度相同，BM25 會退化成 IDF 加權的交集。query 端 tf 以 k3 飽和。
-- **pHash**：imagehash 64 bits，FAISS `IndexBinaryFlat`，分數 = 1 − hamming/64。
-- **Cluster pruning**：隨機 √N 個 leader、b1=1、b2=4，與 IVF 的差別是不做 k-means。
-- **延遲**：FAISS 執行緒數設為 1、全部 CPU；embed 延遲取自 03 腳本逐張量測。
-- **人工標註盲標**：`judgments.csv` 不含系統來源，來源另存 `pool_systems.csv`；pool 順序打亂；`pool` 不覆寫已存在的標註檔。合併方式預設 min（兩人都認為相關才算）。
-- **Demo 的 query 一律線上抽特徵**（即使來自 query set），延遲才是真實值；query set 的 query 會顯示 qrels 等級與前 K 名的 nDCG@10 / AP / RR（深度與評估的 1,000 不同，數值不能直接對照 summary）。
-- **Demo 事件一律用 `.input`**，避免程式更新元件時連鎖觸發重設（例如從 failure analysis 載入 query）。
-
-## 待解決問題
-
-- **Tag 詞彙表**：proposal 只說 "a fixed external class list"。不能用 COCO 80 類（會跟 semantic qrels 的評分依據重疊，造成洩漏）。暫用 open_clip 內建的 ImageNet-1k 類別名稱，可在 config 換掉。
+- **IVF-PQ 參數隨圖庫大小調整**：`nlist: null` = round(√N)（與 cluster pruning 的 leader 數同量級），nbits 不超過 log2(N)，m=32 可整除 384 / 512 / 768。預設圖庫只有 2,000 張，固定 nlist=256 會訓練不足。
+- **ANN 索引延遲載入**：40k 張時每個 HNSW 約 100 MB，demo 啟動只載 flat；`_added` 紀錄 demo 加入的圖，延遲載入的索引會補上，結果才和 flat 一致。
+- **Rocchio 沒有回饋時不報錯**：結果不變，`SearchResponse.notes` 說明。回饋中不在圖庫的 id 忽略。
+- **dark mode**（使用者 2026-11-23 要求）：階段 4 在 demo 加切換。
+- **新 branch**：伺服器正在用 `feat/zero-shot-search` 下載資料，避免中途改到它；新 branch 完成後再讓使用者切換。
+- **cache / data 不進 git**：沿用 zip 的 `.gitignore`。
 
 ## 測試指令與結果
 
-開發環境沒有 torch、模型權重與資料集，只能用合成資料跑單元測試（不需要 torch）。
-測試用套件裝在 scratchpad：`pip install --target <dir> numpy faiss-cpu pillow pyyaml pandas scipy imagehash pytrec_eval-terrier pytest tqdm`
-
 ```bash
-PYTHONPATH=<dir> python3 -m pytest -q -p no:cacheprovider tests
+SP=/tmp/claude-1000/-home-user-projects-landmark-retrieval/f04e3a8f-3702-474e-8cc3-e040267ca451/scratchpad
+PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "not models"
 ```
 
-- 階段 3：單元測試 **43 passed**；demo 以假特徵（stub torch、替換線上抽特徵）逐一呼叫事件處理函式：semantic+並排、Rocchio 回饋、box query＋使用者框選、Holidays（排除 query 本身）、上傳圖片、failure analysis、不合法設定的錯誤訊息都正常；實際 `launch()` 後 `/` 與 `/config` 回 200。
-- 階段 2：煙霧測試（假的 COCO / Holidays / phone 資料＋隨機特徵，代替需要 torch 的 03）：
-  `02 → 04 → 05 → 05 --speed → 06 pool → （模擬兩位評審）→ 06 kappa → 06 qrels → 05 --queries phone` 全部跑通，
-  輸出欄位正確；similar 的 query 向量 = 原圖 + 雜訊時，向量模型 mAP = 1，IVF-PQ / cp 有 recall 損失。產生假資料的程式在 scratchpad，未進 repo。
-  03、07 需要 torch / open_clip / 模型權重，**尚未執行過**。
-- 階段 1：**43 passed**（指標 vs pytrec_eval、BM25 公式、cluster pruning、各索引、pHash、alpha-QE/Rocchio/MMR/RRF、manifest/qrels、edit、pipeline 各設定、評估流程含 Rocchio frozen ranking）
+- 階段 0（匯入後未修改）：132 passed、1 failed（`test_resolve_device_cpu_passthrough` 需要 torch，sandbox 沒有）。
+- 階段 1：162 passed（新增 `test_index_kinds.py`、`test_engine_rerank.py`、re-ranker 與 SearchRequest 的測試）。zip 附的真實 cache（2,000 張 CLIP / DINOv2 / pHash）跑 `04_build_index.py --index flat cluster ivfpq hnsw` 成功（IVF-PQ 0.68 MB vs flat 3.9 MB）。
 
 ## 下一步
 
-程式部分已完成。下一步在有 GPU 的機器上依 README 第 4 節實際執行 01–07 與 demo，並處理「未完成」中列的項目。
-本 branch 尚未 push；sandbox 為 clone mode，host 端用 `git fetch sandbox-<name> feat/zero-shot-search` 取回。
+階段 2：資料（01 下載 + 檢查修復、Holidays 併入圖庫、box query、check_data）。
