@@ -3,6 +3,7 @@
 需要先完成 scripts/02–04（圖庫特徵與索引）；failure analysis 分頁需要 scripts/05 的 per_query 結果。
 檢索一律呼叫 src/pipeline.py，與評估腳本是同一份程式。
 """
+import os
 import sys
 from pathlib import Path
 
@@ -54,10 +55,13 @@ def query_sets_of(gallery: str) -> list[str]:
     return [n for n in list_sets(CACHE, "queries") if get_set(n).meta.get("gallery") == gallery]
 
 
+NO_GALLERY = "沒有可用的圖庫：請先依序執行 scripts/01_download_data.py、02_prepare_data.py、03_extract_features.py、04_build_indexes.py"
 EMPTY = (None, None, [], None, None)          # raw, set_box, points, box, view
 
 
 def on_gallery(gallery):
+    if not gallery:
+        return gr.update(choices=[], value=None), gr.update(choices=[], value=None), *EMPTY
     sets = query_sets_of(gallery)
     return gr.update(choices=sets, value=sets[0] if sets else None), gr.update(choices=[], value=None), *EMPTY
 
@@ -107,12 +111,18 @@ def run_one(gallery, config_id, query, feedback=None):
         raise gr.Error(f"不支援的設定組合：{config_id}")
     pipe = get_pipeline(gallery)
     req, grades, max_grade = make_request(config_id, *query, feedback=feedback)
-    result = pipe.search(req)
+    try:
+        result = pipe.search(req)
+    except FileNotFoundError as e:
+        raise gr.Error(f"{config_id} 缺少特徵或索引（{os.path.basename(e.filename or '')}），"
+                       "請先對這個圖庫執行 scripts/03_extract_features.py 與 04_build_indexes.py")
     metrics = query_metrics(result.ids, grades) if grades is not None and (grades >= 1).any() else None
     return result, render_result(pipe, result, N_SHOW, grades, max_grade, metrics)
 
 
 def search(gallery, source, qset, qidx, raw, set_box, box, compare, *panels):
+    if not gallery:
+        raise gr.Error(NO_GALLERY)
     if raw is None:
         raise gr.Error("請先上傳圖片或選擇 query")
     query = (source, qset, qidx, raw, set_box, box)
@@ -126,6 +136,8 @@ def search(gallery, source, qset, qidx, raw, set_box, box, compare, *panels):
 
 def search_feedback(gallery, source, qset, qidx, raw, set_box, box, rel, nonrel, *panel):
     """Rocchio：以勾選的相關 / 不相關結果更新 query，重新搜尋設定 A（自動加上 rocchio）。"""
+    if not gallery:
+        raise gr.Error(NO_GALLERY)
     if raw is None:
         raise gr.Error("請先搜尋一次")
     if not rel and not nonrel:
@@ -167,6 +179,9 @@ def build_app() -> gr.Blocks:
     all_qsets = list_sets(CACHE, "queries")
     with gr.Blocks(title="Zero-Shot Image Search") as demo:
         gr.Markdown("# Zero-Shot Image-to-Image Search\n上傳任意照片：**semantic** 找同一類東西，**similar** 找同一張圖或同一個場景。")
+        if not galleries:
+            gr.Markdown(f"> ⚠️ {NO_GALLERY}")
+            print(f"!! {NO_GALLERY}")
         with gr.Tab("搜尋"):
             with gr.Row():
                 with gr.Column(scale=1):
