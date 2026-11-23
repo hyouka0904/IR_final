@@ -29,16 +29,7 @@ from src.data import (box_queries, download_images, gallery_path, holidays_recor
                       load_coco_instances, select_subset, write_manifest)
 from src.download import ensure_archive, extract_with_retry, fetch, split_problems
 
-ANN_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
-ANN_FILES = ("instances_train2017.json", "instances_val2017.json")
-HOLIDAYS_URLS = [f"ftp://ftp.inrialpes.fr/pub/lear/douze/data/{p}.tar.gz" for p in ("jpg1", "jpg2")]
-REVISITOP_ZIP = "https://github.com/filipradenovic/revisitop/archive/refs/heads/master.zip"
-REVISITED = {  # the sources revisitop's download.py uses
-    "roxford5k": ("https://www.robots.ox.ac.uk/~vgg/data/oxbuildings", ["oxbuild_images-v1.tgz"]),
-    "rparis6k": ("https://www.robots.ox.ac.uk/~vgg/data/parisbuildings",
-                 ["paris_1-v1.tgz", "paris_2-v1.tgz"]),
-}
-GND_URL = "http://cmp.felk.cvut.cz/revisitop/data/datasets/{0}/gnd_{0}.pkl"
+ANN_FILES = ("instances_train2017.json", "instances_val2017.json")  # URLs: config `sources`
 
 
 def report_broken(broken, check_only: bool) -> None:
@@ -53,7 +44,7 @@ def report_broken(broken, check_only: bool) -> None:
 
 # ---------------- 1. annotations ----------------
 
-def annotations(root, check_only: bool) -> bool:
+def annotations(cfg, root, check_only: bool) -> bool:
     print(">> COCO annotations")
     ann_dir = root / "annotations"
     zip_path = root.parent / "annotations_trainval2017.zip"
@@ -64,7 +55,7 @@ def annotations(root, check_only: bool) -> bool:
     has_zip = any(p.exists() for p in (zip_path, zip_path.with_name(zip_path.name + ".part"),
                                        legacy))
     if has_zip or not have_json:
-        z = ensure_archive(ANN_URL, zip_path if zip_path.exists() or not legacy.exists() else legacy,
+        z = ensure_archive(cfg["sources"]["coco_annotations"], zip_path if zip_path.exists() or not legacy.exists() else legacy,
                            check_only)
         if z is None:
             return False
@@ -84,7 +75,7 @@ def annotations(root, check_only: bool) -> bool:
             if check_only:
                 return False
             z.unlink()
-            return annotations(root, check_only)
+            return annotations(cfg, root, check_only)
     else:  # no zip to compare with: at least make sure the JSON files are not cut short
         for n in ANN_FILES:
             with open(ann_dir / n, "rb") as f:
@@ -96,7 +87,7 @@ def annotations(root, check_only: bool) -> bool:
                 if check_only:
                     return False
                 (ann_dir / n).unlink()
-                return annotations(root, check_only)
+                return annotations(cfg, root, check_only)
     print("   complete")
     return True
 
@@ -157,12 +148,14 @@ def holidays(cfg, check_only: bool) -> bool:
         print(f"   complete ({n_ok} images)")
         return True
     print(f"   {n_ok} / {n_expected} images usable")
-    for url in HOLIDAYS_URLS:
+    urls = cfg["sources"]["holidays"]
+    for url in urls:
         try:
             archive = ensure_archive(url, d / url.rsplit("/", 1)[1], check_only)
         except Exception as e:  # FTP blocked etc.: Holidays is optional, carry on without it
             print(f"!! Holidays download failed ({type(e).__name__}: {e}); skipped.\n"
-                  f"   Some networks block FTP. Try another network, or fetch {', '.join(HOLIDAYS_URLS)}\n"
+                  f"   Some networks block FTP. Try another network (or a mirror in config\n"
+                  f"   sources.holidays), or fetch {', '.join(urls)}\n"
                   f"   elsewhere, put the files in {d} and run this script again.", file=sys.stderr)
             return False
         if archive is not None and not check_only:
@@ -182,7 +175,7 @@ def revisitop_code(cfg) -> None:
         print(">> revisitop code: present")
         return
     repo = code.parent
-    z = fetch(REVISITOP_ZIP, repo.parent / "revisitop-master.zip")
+    z = fetch(cfg["sources"]["revisitop_code"], repo.parent / "revisitop-master.zip")
     with zipfile.ZipFile(z) as zf:
         zf.extractall(repo.parent)
     if repo.exists():
@@ -204,10 +197,10 @@ def revisited(cfg, check_only: bool) -> bool:
     """Complete = every image the gnd file lists (gallery + queries) is readable. RParis's
     archives contain 20 corrupt images that the gnd file leaves out."""
     all_ok = True
-    for ds, (base, files) in REVISITED.items():
+    for ds, urls in cfg["sources"]["revisited"].items():
         print(f">> {ds}")
         d = resolve_path(cfg, "revisited") / ds
-        gnd_url, gnd_path = GND_URL.format(ds), d / f"gnd_{ds}.pkl"
+        gnd_url, gnd_path = cfg["sources"]["revisited_gnd"].format(ds), d / f"gnd_{ds}.pkl"
         gnd = _load_gnd(gnd_path) if ensure_archive(gnd_url, gnd_path, check_only) else None
         if gnd is None and gnd_path.exists():
             print(f"   {gnd_path.name} is unreadable" + ("" if check_only else "; downloading again"))
@@ -227,9 +220,8 @@ def revisited(cfg, check_only: bool) -> bool:
         print(f"   {need} / {len(paths)} images missing or broken"
               + ("" if check_only else "; extracting again"))
         all_ok = False
-        for name in files:
-            url = f"{base}/{name}"
-            archive = ensure_archive(url, d / name, check_only)
+        for url in urls:
+            archive = ensure_archive(url, d / url.rsplit("/", 1)[1], check_only)
             if archive is not None and not check_only:
                 extract_with_retry(url, archive, d / "jpg")
                 archive.unlink()  # the images are out; the archives are large
@@ -258,7 +250,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     root = resolve_path(cfg, "data")
-    status = {"annotations": annotations(root, args.check_only)}
+    status = {"annotations": annotations(cfg, root, args.check_only)}
     if not status["annotations"] and not args.check_only:
         sys.exit("!! the COCO annotations are not usable")
     if status["annotations"]:  # the subset is picked from the annotations

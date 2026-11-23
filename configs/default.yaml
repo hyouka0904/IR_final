@@ -9,6 +9,20 @@ paths:
   revisitop: third_party/revisitop/python   # official revisitop evaluation code
   phone: data/phone         # the ~100 phone photos for the user study
 
+sources:                   # download URLs; point one at a mirror if your network blocks it
+  coco_annotations: http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+  holidays:                # INRIA Holidays (FTP; some networks block it)
+    - ftp://ftp.inrialpes.fr/pub/lear/douze/data/jpg1.tar.gz
+    - ftp://ftp.inrialpes.fr/pub/lear/douze/data/jpg2.tar.gz
+  revisited:               # the archives revisitop's download.py uses
+    roxford5k: [https://www.robots.ox.ac.uk/~vgg/data/oxbuildings/oxbuild_images-v1.tgz]
+    rparis6k: [https://www.robots.ox.ac.uk/~vgg/data/parisbuildings/paris_1-v1.tgz,
+               https://www.robots.ox.ac.uk/~vgg/data/parisbuildings/paris_2-v1.tgz]
+  revisited_gnd: http://cmp.felk.cvut.cz/revisitop/data/datasets/{0}/gnd_{0}.pkl
+  revisitop_code: https://github.com/filipradenovic/revisitop/archive/refs/heads/master.zip
+  openimages: https://storage.googleapis.com/openimages/v7/oidv7-class-descriptions-boxable.csv
+  places365: https://raw.githubusercontent.com/CSAILVision/places365/master/categories_places365.txt
+
 data:
   gallery_size: 2000        # README target: 40000
   semantic_queries: 200     # README target: 1000

@@ -1,0 +1,10 @@
+# CI: everything the tests import. No torch / torchvision / open_clip / timm: model loading is
+# lazy and the `models` tests (real weights) are skipped in CI; the smoke test uses a fake encoder.
+faiss-cpu
+imagehash
+pillow
+numpy
+pyyaml
+requests
+pytest
+gradio

@@ -6,4 +6,5 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["models: needs pretrained weights (downloads on first run)"]
+markers = ["models: needs pretrained weights (downloads on first run)",
+           "smoke: the numbered scripts end to end on fake data (no network, GPU or weights)"]
