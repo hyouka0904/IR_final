@@ -57,7 +57,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 
 ## 重要決策
 
-- **Windows 建置流程**（2026-11-23）：使用者在 Windows 上跑。README 新增 1.4（conda、PYTHONUTF8、torch CUDA 版本、faiss-cpu、路徑限制、常見問題）。程式面的修正：manifest 一律存 `/` 分隔的路徑（`rel_path` 用 `as_posix()`，cache 可在 Windows / Linux 間搬移），json 讀寫都指定 utf-8，judgments.html 的圖片路徑改用 `/`，讀 `judgments.csv` 用 `utf-8-sig`（Excel「CSV UTF-8」會加 BOM）。pytest、pytrec_eval-terrier 移到 `requirements-dev.txt`，在 Windows 若需要編譯而失敗，不會擋住主要套件的安裝。
+- **Windows 建置流程**（2026-11-23）：使用者在 Windows 上跑。README 新增 1.4（conda、PYTHONUTF8、torch CUDA 版本、faiss-cpu、路徑限制、常見問題）。程式面的修正：manifest 一律存 `/` 分隔的路徑（`rel_path` 用 `as_posix()`，cache 可在 Windows / Linux 間搬移），json 讀寫都指定 utf-8，judgments.html 的圖片路徑改用 `/`，讀 `judgments.csv` 用 `utf-8-sig`（Excel「CSV UTF-8」會加 BOM）。pytest、pytrec_eval-terrier 移到 `requirements-dev.txt`，在 Windows 若需要編譯而失敗，不會擋住主要套件的安裝。使用者照舊 README 用 `cu121` 裝到 torch 2.5.1，與 open_clip 4.x（需要 torch>=2.6）衝突；README 預設改成 `cu126`，並加上 nvidia-smi CUDA 版本 → wheel index 的對照表。
 - **01 下載改用 Python**（2026-11-23）：使用者在 Windows PowerShell 執行 `bash scripts/01_download_data.sh` 失敗（`set: pipefail` 無效，CRLF 換行造成），且 Windows 通常沒有 curl/wget/unzip/tar 的 bash 環境。改成 `scripts/01_download_data.py`，只用標準函式庫（urllib、zipfile、tarfile）；ROxford / RParis 也自己下載攤平（revisitop 的 download.py 用 `os.system('wget …')`，Windows 不能用），revisitop 程式碼改下載 GitHub zip，不需要 git。02 / 04 / 05 / 07 缺前置資料時改成印出明確訊息並結束（原本 04 / 05 什麼都不印、07 直接 traceback）。
 
 - **config_id = `{method}-{index}-{post}`**：method ∈ clip / siglip / dinov2 / phash / bm25 / {向量模型}+bm25；index ∈ flat / hnsw / ivfpq / cp（bm25 單獨時為 inv，phash 只有 flat）；post 為 none 或 aqe / rocchio / mmr 以 + 串接。不跑完整網格，每個 query set 跑哪些設定寫在 `eval.experiments`。
