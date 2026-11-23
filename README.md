@@ -1,333 +1,228 @@
-# Zero-Shot Image-to-Image Search Engine
+# Zero-Shot Image-to-Image Search
 
-使用者上傳任意一張照片，系統就從約 4 萬張日常照片（MS-COCO 2017）中排序出結果。系統支援兩種任務：
+**English** | [繁體中文](README.zh-TW.md)
 
-- **Semantic search**：找同一類東西，例如拿貓的照片找其他貓。
-- **Similar-image search**：找同一張圖或同一個場景，包括裁切、編輯過或重拍的版本。
+An image-to-image search engine built for an Information Retrieval course final project. You upload any photo you took yourself, and the system returns a ranked list from a gallery of about 40,000 everyday photos. It supports two tasks over the same gallery:
 
-研究問題：**哪一種影像表示法適合哪一種任務？** 我們比較 CLIP、SigLIP、DINOv2、pHash，以及以 CLIP 概念標籤（tag）為文件的 BM25。全部只用預訓練模型（zero-shot），並以 trec_eval 的指標評估。題目與分工見 [`proposal.md`](proposal.md)。
+- **Semantic search.** Finds images of the *same kind of thing*. A photo of your cat returns other cats, even though your cat is not in the gallery.
+- **Similar-image search.** Finds images that are *the same picture or scene*: cropped, recolored, compressed or re-photographed copies, and other shots of the same scene.
 
----
+No model is trained or fine-tuned. Every component is pre-trained, so any photo can be used as a query (zero-shot).
 
-## 1. 環境建置
+> **Status:** in development (November 2026). Weeks 1–2 work: CLIP, DINOv2 and pHash embeddings, FAISS Flat search for both tasks, synthetic edits, CLIP zero-shot tags in an HW1-format inverted index with HW2 BM25, RRF fusion, the evaluation script, a Gradio demo and the photo-pair check (see *Getting started*). Feedback, MMR, ANN indexes and SigLIP are still planned.
 
-### 1.1 系統需求
+## Why two tasks
 
-- Linux（以 Ubuntu 22.04 測試）或 Windows 10 / 11（見 [1.4](#14-windows)），Python 3.11
-- NVIDIA GPU：只有抽特徵（`03`、`07`）時需要；評估與 demo 都可以只用 CPU
-- 硬碟：COCO 抽樣圖片約 7 GB、Holidays 約 2.5 GB；特徵與索引另外約 2 GB
+The same query has different relevant results depending on the task. For a photo of a cat on a sofa, semantic search counts every cat as relevant, while similar-image search counts only copies of that photo. The project's core question is:
 
-### 1.2 建立環境
+> **Which image representation suits which retrieval task?**
 
-```bash
-conda create -n zsis python=3.11 -y
-conda activate zsis
+Both tasks share one gallery, one indexing layer and one evaluation framework. Only the representation and the definition of relevance change.
 
-# PyTorch >= 2.6（open_clip 新版的要求）；cu126 請依本機調整，見下表
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-# FAISS：一律用 CPU 版（HNSW 只支援 CPU，所有索引都在 CPU 上量延遲才公平）
-pip install faiss-cpu
+## How it works
 
-pip install -r requirements.txt
-pip install -r requirements-dev.txt   # 單元測試用（選用）
+```mermaid
+flowchart LR
+    subgraph Offline
+        G[Gallery images] --> C[CLIP / SigLIP embedding]
+        G --> D[DINOv2 embedding]
+        G --> H[pHash]
+        C --> T[CLIP zero-shot tags]
+        C --> FC[(FAISS index)]
+        D --> FD[(FAISS index)]
+        T --> II[(Inverted index)]
+    end
+    subgraph Online
+        Q[Query photo] --> P[EXIF fix, resize, optional crop]
+        P --> S{Task}
+        S -->|Semantic| R1["CLIP kNN + tag BM25, RRF fusion"]
+        S -->|Similar| R2[DINOv2 kNN / pHash Hamming]
+        R1 --> RR[Re-rank: Rocchio, alpha-QE, MMR]
+        R2 --> OUT[Ranked results]
+        RR --> OUT
+    end
+    FC -.-> R1
+    II -.-> R1
+    FD -.-> R2
 ```
 
-| `nvidia-smi` 顯示的 CUDA Version | `--index-url` 結尾 |
-|---|---|
-| ≥ 12.8（含 13.x） | `cu128` |
-| 12.6、12.7 | `cu126` |
-| 12.4、12.5 | `cu124`，並指定版本：`pip install "torch==2.6.*" "torchvision==0.21.*" --index-url .../cu124` |
-| < 12.4 | 先更新 NVIDIA 驅動（`cu121` 最高只有 torch 2.5.1，不符合 open_clip 的要求） |
-| 沒有 NVIDIA 顯卡 | 拿掉 `--index-url`，裝 CPU 版 |
-
-DINOv2 透過 `torch.hub` 載入，第一次執行時會自動下載權重；CLIP / SigLIP 權重由 open_clip 下載。
-
-### 1.3 驗證安裝
-
-```bash
-python -c "import torch, faiss, open_clip, imagehash; print(torch.cuda.is_available(), faiss.__version__)"
-python -m pytest -q tests        # 單元測試＋冒煙測試，不需要 GPU、資料集與模型權重（約 10 秒）
-python -m pytest -q -m "not smoke"   # 只跑單元測試
-```
-
-冒煙測試（`tests/test_smoke_pipeline.py`）用幾百張隨機圖片與隨機向量（取代 03），依序以子行程執行 02 → 04 → 05 → 05 --speed → 06 → check_data，確認腳本之間能銜接、輸出齊全。
-
-**CI**：每次 push 與 PR 都會由 GitHub Actions（`.github/workflows/ci.yml`）在 Ubuntu 與 Windows 上，以 Python 3.11 跑語法檢查、單元測試與冒煙測試。CI 只裝 `requirements-ci.txt`（不含 torch），所以 03、07 與 demo 的線上抽特徵不在 CI 範圍內，仍需在有 GPU 的機器上實際執行。部署（伺服器上的 demo）維持手動。
-
-### 1.4 Windows
-
-所有腳本都是 Python，不需要 bash、WSL、curl、wget、unzip 或 tar。以下指令在 **PowerShell**（或 Anaconda PowerShell Prompt）執行。
-
-**1. 事前準備**
-
-- 安裝 [Miniconda](https://docs.conda.io/en/latest/miniconda.html)。若要在一般 PowerShell 用 conda，先執行一次 `conda init powershell` 再重開視窗。
-- 有 NVIDIA 顯卡時，先更新驅動，再用 `nvidia-smi` 查看右上角的 `CUDA Version`，決定下面 PyTorch 要裝的版本。
-- **repo 的位置**：路徑只用英數字（FAISS 讀寫索引時不支援中文路徑），也不要放在 OneDrive 同步的資料夾。「桌面」常被 OneDrive 同步，而資料加上 cache 超過 10 GB。建議放在 `C:\work\IR_final`、`D:\IR_final` 這類位置。
-- 不想把資料放在 repo 裡時，可以改 `configs/default.yaml` 的 `paths.data_root`、`paths.cache_root`。路徑請用斜線，例如 `D:/zsis/data`。
-
-**2. 建立環境**
-
-```powershell
-conda create -n zsis python=3.11 -y
-conda activate zsis
-
-# Windows 的 Python 預設用系統編碼（繁中是 cp950）讀寫檔案；改成 UTF-8，之後每次 activate 自動生效
-conda env config vars set PYTHONUTF8=1 HF_HUB_DISABLE_SYMLINKS_WARNING=1
-conda deactivate; conda activate zsis
-
-# PyTorch >= 2.6：cu126 依 nvidia-smi 的 CUDA Version 換成 1.2 表格中對應的版本
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-pip install faiss-cpu      # PyPI 有 Windows wheel；若安裝失敗改用 conda install -c pytorch faiss-cpu
-pip install -r requirements.txt
-pip install -r requirements-dev.txt   # 選用；pytrec_eval-terrier 若需要編譯而失敗，可以略過，不影響主流程
-```
-
-**3. 驗證**
-
-```powershell
-python -c "import torch, faiss, open_clip, imagehash; print(torch.__version__, torch.cuda.is_available(), faiss.__version__)"
-python -m pytest -q tests
-```
-
-- torch 版本要 ≥ 2.6。如果 pip 出現 `open-clip-torch ... requires torch>=2.6`，代表用了太舊的 `--index-url`（例如 `cu121`）。依 1.2 的表格換一個，重裝即可：`pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu126`。
-- 有 NVIDIA 顯卡但第二個值印出 `False`，代表裝到 CPU 版的 torch。先 `pip uninstall torch torchvision`，再用正確的 `--index-url` 重裝。
-
-**4. 執行**
-
-與 [第 4 節](#4-執行順序) 相同。路徑請用斜線 `/`：Windows 上 `/` 和 `\` 都可以，Linux / macOS 只認 `/`，統一用 `/` 指令就能直接共用：
-
-```powershell
-python scripts/01_download_data.py
-python scripts/02_prepare_data.py
-# ……03 → 05，與第 4 節相同
-python app/app.py
-```
-
-**常見問題**
-
-| 狀況 | 處理方式 |
-|---|---|
-| 01 的 Holidays 下載失敗或卡住 | 官方來源是 FTP，有些網路（例如校園網路）會擋。01 在 60 秒沒收到資料時會放棄、印出提示並繼續後面的步驟，02 會自動略過 Holidays。要補 Holidays 時，換個網路重跑 01，或在能連 FTP 的電腦用 `curl -O ftp://ftp.inrialpes.fr/pub/lear/douze/data/jpg1.tar.gz`（jpg2 同理）下載，放到 `data/holidays/` 後重跑 01。完全不需要時加 `--skip-holidays` |
-| 下載中斷 | 直接重跑，已完成的檔案會跳過（下載中的檔案以 `.part` 結尾，完成才改名） |
-| demo 打不開 | 開 `http://127.0.0.1:7860`。要讓同網段的其他電腦連線，用 `python app/app.py --host 0.0.0.0`。這時本機一樣開 `127.0.0.1`，別台開 `http://<你的 IP>:7860`，而 `0.0.0.0` 不是可以開的網址。Windows 防火牆跳出詢問時要允許。`--share` 會產生公開網址 |
-| 第一次跑 03 卡很久 | 正在下載 CLIP / SigLIP / DINOv2 權重（共數 GB），存在 `%USERPROFILE%\.cache` |
-| GPU 記憶體不足 | `python scripts/03_extract_features.py --batch-size 16`（或更小） |
-| 用 Excel 填 `judgments.csv` | 存檔時選「CSV UTF-8」或「CSV（逗號分隔）」都可以，06 都讀得到。不要改欄位名稱與順序 |
-
----
-
-## 2. 資料
-
-| 名稱（`cache/sets/`） | 角色 | 內容 | 相關性（qrels） |
-|---|---|---|---|
-| `coco40k` | 圖庫 | COCO train2017 中至少有一個標註物件的圖，隨機抽 40,000 張 | — |
-| `coco_semantic` | semantic query | COCO val2017 中有標註的圖，隨機抽 1,000 張 | 等級 = 與 query 共享的 COCO 類別數，上限 2（0 / 1 / 2） |
-| `coco_semantic_box` | 意圖消歧 query | 從 `coco_semantic` 中含 ≥ 2 個類別的 query，選一個面積 ≥ 5% 的物件框起來 | 圖中是否有該類別（0 / 1） |
-| `coco_semantic_box_full` | 對照組 | 與上面相同的 query，但不裁切 | 同上（共用 qrels） |
-| `coco_similar` | similar query | 1,000 張圖庫圖片，平均分配 5 種 edit（crop / rotation / color / JPEG / blur，各 200 張） | edit 前的原圖（1 張） |
-| `holidays_db` / `holidays` | 圖庫 / similar query | INRIA Holidays 1,491 張、500 個 query | 同組的其他照片，排除 query 本身 |
-| `phone` | semantic query | 組員自己拍的 100 張手機照片（`data/phone/`） | pooled human judgments（見 4.2） |
-| ROxford / RParis | supplementary | revisitop 官方資料 | 官方 Easy / Medium / Hard |
-
-- 抽樣都使用固定的 `seed`（`configs/default.yaml`），重跑結果相同。
-- 只抽有標註的圖，因為沒有任何標註的圖無法定義 semantic 分級。
-- edit 的參數範圍在 `data.edits`，每張 query 實際用的參數記在 manifest 的 `edit_params` 欄。JPEG 以外的 edit 都存成 PNG，避免壓縮失真混進其他 edit 類型。
-- **Tag 詞彙表（待決定）**：proposal 寫的是 "a fixed external class list"。不能用 COCO 80 類，因為 semantic 的 qrels 就是依 COCO 類別分級，用同一份清單會造成洩漏。目前預設為 open_clip 內建的 ImageNet-1k 類別名稱，可在 `tags.vocab` 換成任意文字檔（一行一個類別）。
-
----
-
-## 3. 系統設計
-
-### 3.1 設定命名（config_id）
-
-```
-{method}-{index}-{post}
-method : clip | siglip | dinov2 | phash | bm25 | clip+bm25 | siglip+bm25 | dinov2+bm25
-index  : flat | hnsw | ivfpq | cp      （向量部分；bm25 單獨使用時為 inv；phash 只有 flat）
-post   : none，或 aqe / rocchio / mmr 以 + 串接（依此順序執行，只能用在向量模型）
-範例   : siglip+bm25-flat-aqe+mmr
-```
-
-這次不跑完整網格。每個 query set 要跑哪些設定，列在 `eval.experiments`。
-
-### 3.2 線上流程（`src/pipeline.py`，評估與 demo 共用）
-
-1. **前處理**：有框選時先裁切（box cropping）。demo 的框選與 `coco_semantic_box` 走同一段程式。
-2. **抽 query 特徵**：視設定抽向量、pHash，或 CLIP top-15 tag。
-3. **向量檢索**：在 FAISS / cluster pruning 索引上取前 K 名。
-   - **alpha-QE**：用前 n 名擴展 query 向量後再搜一次。
-   - **Rocchio**：`q' = α·q + β·mean(相關) − γ·mean(不相關)`，擴展後再搜一次。demo 中由使用者勾選相關與不相關的結果。
-4. **Tag BM25**：query 的 tag 當作查詢，在圖庫 tag 的 inverted index 上算 BM25。
-5. **RRF**：向量排序與 BM25 排序以 `Σ 1/(60 + rank)` 融合。
-6. **MMR**：`λ·rel − (1−λ)·max sim(已選)` 多樣化重排，讓前幾名涵蓋不同意圖（the cat or the sofa?）。
-7. **輸出**：排序、分數、分階段延遲（embed / search / rerank）、query tag，以及每個結果命中的 tag（explainability）。
-
-### 3.3 各元件
-
-| 元件 | 檔案 | 說明 |
+| Component | Choice | Notes |
 |---|---|---|
-| CLIP / SigLIP / DINOv2 | `src/models/encoders.py` | 使用各模型官方的前處理，輸出 L2-normalized 向量 |
-| pHash | `src/models/phash.py` | imagehash 64 bits、FAISS `IndexBinaryFlat`；分數 = 1 − hamming / 64 |
-| CLIP tagger | `src/models/tagger.py` | 詞彙表 × 4 個 prompt template 取平均；每張圖取 top-15 tag |
-| Inverted index（HW1） | `src/text/inverted_index.py` | 依 doc 排序的 postings、布林 AND / OR，以及給 explainability 用的 forward index |
-| BM25（HW2） | `src/text/bm25.py` | Okapi BM25（k1 = 1.2、b = 0.75，query 端 tf 以 k3 飽和），term-at-a-time 計分 |
-| Cluster pruning（HW2） | `src/index/cluster_pruning.py` | 隨機選 √N 個 leader，b1 = 1、b2 = 4 |
-| FAISS 索引 | `src/index/faiss_index.py` | Flat / HNSW / IVF-PQ，一律用 inner product |
-| alpha-QE / Rocchio / MMR / RRF | `src/rerank/` | |
-| 指標 | `src/eval/metrics.py` | 與 trec_eval 定義相同（見 3.4） |
+| Semantic representation | CLIP (OpenCLIP ViT-B/32), SigLIP | Trained with text supervision, so similarity follows human category concepts; SigLIP is a second semantic model to compare against CLIP |
+| Visual representation | DINOv2 | Image-only self-supervised features, sensitive to appearance and layout |
+| Classic baseline | pHash (64-bit) | Perceptual hash compared by Hamming distance; handles light edits only |
+| Sparse line | CLIP zero-shot tags → inverted index → BM25 | Top-15 concept tags per image act as a "document". Labels come from fixed external class lists (COCO, Open Images, Places), not learned from the gallery |
+| Fusion | Reciprocal Rank Fusion | Combines dense and sparse rankings; shared tags explain why a result matched |
+| Feedback | Rocchio (user-marked), alpha-QE (automatic) | Rocchio moves the query vector toward marked results; alpha-QE is pseudo-relevance feedback |
+| Diversity | MMR | Covers different readings of an ambiguous query ("the cat or the sofa?") |
+| Indexing | FAISS Flat, cluster pruning (≈ IVF), IVF-PQ, HNSW | Measured for recall loss, latency and index size; IVF-PQ adds vector compression |
 
-BM25 文件的 tf：`tags.tf_mode: weighted` 時，每個 tag 依 CLIP 機率重複 `max(1, round(10 × p))` 次，讓高信心的 tag 權重較高，文件長度也有差異。若用 `binary`，15 個 tag 的文件長度全部相同，BM25 會退化成 IDF 加權的交集。
+## Datasets
 
-### 3.4 指標
+Both tasks share the main gallery:
 
-| 指標 | trec_eval 名稱 | 用途 |
+- **Gallery:** a 40,000-image subset of MS-COCO train2017.
+- **Semantic queries:** 1,000 val2017 images, none of which are in the gallery. Graded relevance is the share of COCO object categories a result has in common with the query.
+- **Similar queries:**
+  - 1,000 gallery images with synthetic edits (crop, rotation, color shift, JPEG, blur). The ground truth is the original image.
+  - INRIA Holidays photos merged into the gallery, for real same-scene matches.
+- **User study:** about 100 phone photos, judged by pooling (see Evaluation).
+- **External benchmark (supplementary):** [ROxford5k / RParis6k](https://github.com/filipradenovic/revisitop) under the official revisitop protocol, for the similar-image task only. They are not merged into the shared gallery; they let the similar-image results be compared with published work.
+
+Candidate open datasets, ranked by fit for this project (availability checked 2026-11-18):
+
+| # | Dataset | Size | Labels | Tasks | Access / license |
+|---|---|---|---|---|---|
+| 1 | [MS-COCO 2017](https://cocodataset.org/) ([HF mirror](https://huggingface.co/datasets/detection-datasets/coco)) | train 117k, val 4.95k | 80 object classes, multi-label | Semantic + similar (synthetic) | Direct download; annotations CC BY 4.0 |
+| 2 | [Open Images V7](https://storage.googleapis.com/openimages/web/download_v7.html) (subset) | val 41,620 (full 9.18M) | 20,638 image-level classes | Semantic + similar (synthetic) | `downloader.py` or FiftyOne; images mostly CC BY 2.0 |
+| 3 | [Unsplash Lite](https://github.com/unsplash/datasets) | ~25k | Keywords only | Demo; similar (synthetic) | ~700 MB; commercial and non-commercial use, no redistribution of images |
+| 4 | [INRIA Holidays](https://thoth.inrialpes.fr/~jegou/data.php.html) | 1,491 images, 500 queries | Same-scene groups | Similar (real) | FTP links listed; not yet tested |
+| 5 | [INRIA Copydays](https://thoth.inrialpes.fr/~jegou/data.php.html) | Originals + crop/JPEG/strong attacks | Copy pairs | Similar (real edits) | HTTP archives listed |
+| 6 | [Caltech-256](https://data.caltech.edu/records/nyy15-4j048) | 30,607 images | 256 classes, single-label | Semantic + similar (synthetic) | 1.2 GB direct download; CC BY 4.0 |
+| 7 | [Places365](https://github.com/CSAILVision/places365) | 365 scene classes | Scene labels | Semantic (scenes) | Tarball on data.csail.mit.edu; main site unreachable when checked |
+| 8 | [Flickr30k](https://huggingface.co/datasets/nlphuji/flickr30k) (HF mirror) | 31,014 images | 5 captions each, no classes | Semantic (caption-derived) | 4.4 GB; non-commercial research |
+| 9 | [California-ND](https://sites.google.com/site/vonikakis/datasets) | 701 personal photos | Near-duplicate probabilities from 10 annotators | Similar (real) | Encrypted zip, password by email |
+| 10 | [DISC21](https://ai.meta.com/datasets/disc21-dataset/) | 1M references + 50k queries | Copy pairs | Similar (real edits) | ~350 GB; license not stated on page |
+
+## Evaluation
+
+Runs are written in TREC format and scored with `trec_eval`.
+
+| Task | Metrics |
+|---|---|
+| Semantic search | nDCG@10, mAP (graded relevance from shared COCO categories) |
+| Similar-image search | Recall@1, Recall@10, MRR, reported per edit type |
+| Phone-photo queries | Pool the top 10 of every system; two annotators grade 0/1/2; nDCG@10 and Cohen's kappa |
+| Efficiency | Median latency per stage (embedding, search, re-rank), index size, ANN recall loss against Flat. Search is always timed on CPU so that HNSW, which FAISS runs only on CPU, is compared fairly |
+| Per-query diagnostics | AP for every query and configuration; a hard-query list sorted by AP, used for failure analysis and shown in the demo |
+
+**Planned experiments**
+
+1. A cross table of 4 representations (CLIP, SigLIP, DINOv2, pHash) × 2 tasks.
+2. Semantic ablation: CLIP only, tag BM25 only, RRF fusion, then fusion with alpha-QE and with MMR.
+3. Robustness of DINOv2 against pHash for each edit type.
+4. Flat vs. cluster pruning vs. IVF-PQ vs. HNSW.
+5. Supplementary: the similar-image task on ROxford/RParis (Easy / Medium / Hard mAP).
+
+**Current results** (2,000-image gallery, 200 semantic queries; `results/summary.csv`)
+
+| Semantic | nDCG@10 | mAP |
 |---|---|---|
-| nDCG@10 | `ndcg_cut_10` | 主要指標；gain 為 qrels 等級本身 |
-| mAP | `map` | run 深度 1,000（`retrieval.depth`） |
-| Recall@1、Recall@10 | `recall_1`、`recall_10` | similar 任務只有 1 張相關圖時最直觀 |
-| MRR | `recip_rank` | |
-| cat_coverage_10 | — | 前 10 名涵蓋了 query 幾成類別；用來看 MMR 的多樣性，nDCG 看不出這一點 |
-| recall 損失 | — | 1 − ANN 前 K 名與 Flat 前 K 名的重疊比例 |
-| 延遲、索引大小 | — | 延遲分 embed / search / rerank 三段；search 一律在 CPU、單執行緒量測 |
+| CLIP kNN | 0.652 | 0.236 |
+| DINOv2 kNN | 0.684 | 0.274 |
+| Tag BM25 | 0.656 | 0.279 |
+| RRF fusion (CLIP + tags) | 0.676 | 0.277 |
+| Tag BM25, no COCO labels | 0.653 | 0.276 |
+| RRF fusion, no COCO labels | 0.675 | 0.275 |
 
-semantic 的 qrels 若展開成 TREC 檔，會有上千萬列（person 類別出現在將近一半的 COCO 圖片中），因此只存類別矩陣，指標直接在 numpy 上計算。`tests/test_metrics.py` 以 pytrec_eval（trec_eval 的 Python 綁定）逐 query 驗證兩者結果一致。`05_run_eval.py --write-runs` 也會輸出 TREC run 檔，可以再用官方 trec_eval 交叉檢查。
+**Photo pairs** (`scripts/06_pairs.py`, `results/pairs.csv`). 10 synthetic pairs for now (a COCO val image joins the gallery; its crop 0.6 + rotation + color + JPEG edit is the query). Partner at rank 1 / in the top 10: CLIP 9/10 · 10/10, DINOv2 9/10 · 10/10, fusion 7/10 · 10/10, tag BM25 4/10 · 7/10, pHash 0/10 · 0/10. Real phone-photo pairs go in `data/pairs/<name>/` and run the same way.
 
----
+**Leakage note.** The semantic ground truth comes from COCO categories, so having the 80 COCO class names in the tag vocabulary gives the tag line a head start. The `_nococo` rows drop every term that comes only from COCO and re-tag the gallery over the smaller vocabulary (971 → 955 terms). Only 16 of the 80 COCO names go; the other 64 survive word for word through Open Images or Places365. So the ablation removes only a small part of the head start, and the small gap it shows (tags nDCG@10 0.656 → 0.653) is a lower bound on the leakage, not a measure of it.
 
-## 4. 執行順序
-
-```bash
-python scripts/01_download_data.py          # COCO 標註、Holidays（加 --with-roxford 另外下載 ROxford / RParis）
-python scripts/02_prepare_data.py           # 抽樣、只下載用得到的 COCO 圖片、產生 edit / box query、寫 qrels
-python scripts/check_data.py                # 資料完整性檢查（01、02 之後都可以跑；--full 每張圖完整解碼）
-python scripts/03_extract_features.py       # CLIP / SigLIP / DINOv2 / pHash / tag（需要 GPU 比較快）
-python scripts/04_build_indexes.py          # flat / hnsw / ivfpq / cp、pHash、tag inverted index
-python scripts/05_run_eval.py               # 每個 query set 跑 eval.experiments
-python scripts/05_run_eval.py --speed       # 索引比較（recall 損失、延遲、大小）
-python scripts/07_roxford_supplementary.py  # supplementary（需要 --with-roxford）
-
-python app/app.py                           # demo：開 http://127.0.0.1:7860（--host 0.0.0.0 開放區網、--share 產生公開網址）
-```
-
-`check_data.py` 檢查的項目：
-
-- 有沒有未完成的下載（`.part`）
-- COCO 標註的圖片數與類別數
-- Holidays、ROxford / RParis 的圖片數與 query 數，以及每張圖是否可讀取。只檢查 gnd 用到的圖，RParis 原始封存檔中本來就有 20 張損毀的圖
-- `cache/sets` 每個 set 的大小與 config 一致，id 不重複，圖片可讀取，box、source_idx、exclude_idx 合法，qrels 的大小與 id 和圖庫對得上，每個 query 至少有一張相關圖
-
-還沒下載的選用資料集（Holidays、ROxford）會標成略過，不算失敗。有任何失敗時結束碼為 1。`pytest tests/test_data_integrity.py` 會用合成資料測試這些檢查本身，資料存在時也會檢查真實資料。
-
-輸出在 `results/{query_set}/`：
-
-- `summary.csv`：每個設定的整體指標
-- `summary_by_edit.csv`：只有 `coco_similar` 有，是逐 edit 類型的 robustness 分析
-- `per_query/{config_id}.csv`：逐 query 指標，供 failure analysis 使用
-- `summary_speed.csv`：`--speed` 的索引比較結果
-
-### 4.1 Rocchio 的評估協定
-
-1. 先跑去掉 rocchio 的設定，取得初次排序。
-2. 以 qrels 模擬使用者，判斷前 10 名（等級 ≥ 1 視為相關）。
-3. 帶著回饋重新搜尋。
-4. 使用 **frozen ranking**：已判斷的前 10 名維持原位，只重排其後的結果。這是為了不把使用者已經看過的答案算成 Rocchio 的進步。
-
-延遲包含兩輪搜尋。
-
-### 4.2 人工標註（phone）
-
-```bash
-# 1. 把 100 張手機照片（JPEG / PNG；HEIC 請先轉檔）放進 data/phone/，再跑 02、03
-python scripts/06_human_judgments.py pool    # 各系統前 10 名的聯集，打亂順序 → results/phone/judgments.csv
-# 2. 兩位組員各自填 judge_a / judge_b 欄（0 不相關、1 部分相關、2 相關），可對照 judgments.html 看圖
-python scripts/06_human_judgments.py kappa   # Cohen's kappa（一般、線性加權、二元）→ results/phone/kappa.json
-python scripts/06_human_judgments.py qrels   # 依 judging.aggregate（預設 min）合併 → cache/sets/phone/qrels.txt
-python scripts/05_run_eval.py --queries phone
-```
-
-- 標註時不要打開 `pool_systems.csv`（每張圖是哪些系統找到的），避免影響判斷。
-- `pool` 不會覆寫已存在的 `judgments.csv`，避免蓋掉已完成的人工標註。
-- 未進 pool 的圖視為不相關，與 trec_eval 的慣例相同。
-
-### 4.3 Demo
-
-- **Query**：上傳任意照片（也可以用剪貼簿或 webcam），或從評估用的 query set 選一張。圖上點兩下即可框選。
-- **任務預設**：semantic 帶入 `siglip+bm25-flat-none`，similar 帶入 `dinov2-flat-none`（`demo.presets`）。
-- **並排比較**：同一張 query 以兩組設定同時搜尋。
-- **Explainability**：顯示 query 的 tag，以及每個結果與 query 共有的 tag。
-- **Rocchio 回饋**：勾選結果中相關與不相關的圖後，重新搜尋。
-- **Query set 的 query**：結果標示 qrels 等級，並顯示該 query 的 nDCG@10、AP、RR。
-- **Failure analysis 分頁**：依指標由低到高列出 query，點一下就載入到搜尋頁。
-
-
-### 4.4 在 Linux 伺服器上開放給區網 / VPN
-
-```bash
-# 1. 讓 demo 聽所有網路介面，並加上帳號密碼（Gradio 預設沒有登入保護）
-python app/app.py --host 0.0.0.0 --auth zsis:<密碼>
-
-# 2. 查伺服器的 IP。區網用 192.168.x.x 這類位址，VPN 用 VPN 介面的位址（例如 Tailscale 的 100.x.x.x）
-hostname -I
-
-# 3. 有開 ufw 的話，只對區網 / VPN 的網段開放 7860（網段依實際環境修改）
-sudo ufw allow from 192.168.0.0/16 to any port 7860 proto tcp
-sudo ufw allow in on tailscale0 to any port 7860 proto tcp     # 用 Tailscale 時
-```
-
-其他電腦開 `http://<伺服器 IP>:7860`。伺服器本機一樣開 `http://127.0.0.1:7860`。
-
-**SSH 登出後繼續執行**：用 tmux。
-
-```bash
-tmux new -s zsis                              # 進入 tmux 後
-conda activate zsis && cd <repo 路徑>
-python app/app.py --host 0.0.0.0 --auth zsis:<密碼>
-# 按 Ctrl+B 再按 D 離開，demo 繼續在背景執行；之後用 tmux attach -t zsis 回來
-```
-
-長時間的 `02`、`03` 也建議在 tmux 裡跑，SSH 斷線才不會中斷。
-
----
-
-## 5. 檔案目錄
+## Planned project layout
 
 ```
-├── configs/default.yaml        # 所有超參數與 eval.experiments
-├── data/                       # [不進 git] coco/, holidays/, phone/, datasets/（ROxford）
-├── cache/                      # [不進 git] sets/, features/, indexes/, text/, tags/
-├── results/                    # 評估輸出（CSV 進 git）
+.
+├── configs/default.yaml      # models, K, fusion and feedback weights, index parameters
+├── data/                     # [not in git] datasets
+├── cache/                    # [not in git] embeddings, hashes, tags, indexes
 ├── src/
-│   ├── data/                   # sets.py（manifest、qrels）, coco.py, holidays.py, edits.py, revisited.py
-│   ├── models/                 # encoders.py, phash.py, tagger.py, names.py
-│   ├── text/                   # inverted_index.py（HW1）, bm25.py（HW2）
-│   ├── index/                  # faiss_index.py, cluster_pruning.py（HW2）
-│   ├── rerank/                 # aqe.py, rocchio.py, mmr.py, rrf.py
-│   ├── eval/                   # metrics.py, protocol.py, trec.py, revisited_eval.py
-│   ├── preprocess/crop.py      # 框選裁切（線上與離線共用）
-│   ├── features.py             # 特徵檔案位置、抽取與載入
-│   ├── schema.py               # SearchRequest, SearchResult
-│   └── pipeline.py             # 線上檢索流程（評估與 demo 共用）
-├── scripts/01–07
-├── app/                        # Gradio demo
-└── tests/                      # 單元測試（合成資料，不需要 GPU 與模型權重）
+│   ├── encoders.py           # CLIP / DINOv2 / pHash behind one interface
+│   ├── tagging.py            # CLIP zero-shot tags over a fixed label vocabulary
+│   ├── sparse/               # inverted index + BM25 (reused from HW1/HW2)
+│   ├── index.py              # FAISS Flat / HNSW, cluster pruning
+│   ├── rerank.py             # RRF, Rocchio, alpha-QE, MMR
+│   ├── edits.py              # synthetic edits for similar-image queries
+│   ├── schema.py             # SearchRequest / SearchResult, agreed by both members
+│   └── pipeline.py           # online search, shared by evaluation and demo
+├── scripts/                  # numbered offline steps: download, embed, tag, index, evaluate
+├── app/                      # web demo
+└── results/
+    ├── summary.csv           # metrics, staged latency, index size, recall loss per configuration
+    ├── per_query/            # AP per query per configuration; source of the hard-query list
+    └── runs/                 # TREC runs and trec_eval output
 ```
 
----
+### Engineering conventions
 
-## 6. 實作狀態
+- All parameters (models, K, fusion and feedback weights, index settings) live in `configs/default.yaml`, never hard-coded.
+- Evaluation scripts and the demo call the same `src/pipeline.py`, so the demo shows exactly what was evaluated.
+- `src/schema.py` fixes the data passed between the two members' modules.
+- Latency is recorded in three stages, with search always on CPU.
 
-- 單元測試全部通過；`02 → 04 → 05 → 06` 已用假資料（隨機特徵）跑通整個流程。
-- **尚未在真實資料與模型上執行過**：開發環境沒有 torch、模型權重與資料集，所以 `03`、`07` 與 demo 的線上抽特徵還沒有實際跑過。第一次執行時請依第 4 節的順序逐步確認。
-- 已知風險：
-  - Holidays 的官方下載位置（INRIA FTP）可能失效，`01` 會提示手動下載。
-  - COCO 圖片是依 URL 逐張下載，中斷後重跑會跳過已下載的檔案。
+## Getting started
 
----
+Working now (Weeks 1–2). The default config runs on a small slice: 2,000 gallery images, 200 semantic queries, 200 similar queries. Raise `data.*` in `configs/default.yaml` toward 40,000 / 1,000 / 1,000 to scale up.
 
-## 7. 分工
+```bash
+python -m venv .venv && .venv/Scripts/activate   # Windows; use .venv/bin/activate elsewhere
+pip install -r requirements.txt
+curl -o data/annotations_trainval2017.zip http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+python scripts/01_download.py          # picks the subset, fetches only those images, writes manifests
+python scripts/02_embed.py --models clip dinov2 phash
+python scripts/03_tag.py              # CLIP zero-shot tags -> cache/tags*/ (HW1 postings format)
+python scripts/04_build_index.py --index flat
+python scripts/05_evaluate.py          # results/summary.csv, results/per_query/, results/runs/
+python scripts/06_pairs.py             # photo-pair check -> results/pairs.csv
+python scripts/search.py my_photo.jpg --task semantic   # or --task similar
+python app/app.py                      # web demo on http://127.0.0.1:7860
+python -m pytest -m "not models"       # fast tests; drop -m to include the real-model tests
+```
 
-| 組員 | 負責 |
+To re-score the TREC runs with `trec_eval`, pass `-l 2` (grades ≥ 2 are exactly the images counted as relevant for mAP), e.g. `trec_eval -l 2 -m map -m ndcg_cut.10 results/runs/semantic.qrels results/runs/semantic_clip.run`. trec_eval's nDCG uses the integer grades 0–3, so it differs slightly from the float-gain nDCG in `summary.csv`.
+
+Still planned: `--index cluster ivfpq hnsw`, SigLIP, Rocchio feedback, alpha-QE and MMR.
+
+A GPU is needed only for embedding. Search and the demo run on CPU.
+
+### Running from the zip
+
+`python scripts/makezip.py` packs the project into `dist/ir_image_search-<date>.zip` (about 400 MB). The zip holds the code, the 2,000 gallery images, the val images, the manifests, the label lists, the photo pairs, the embedding/tag caches and the per-query results, so nothing has to be downloaded or re-embedded. `--code-only` packs just the git files instead. Not included: `.venv`, demo photos in `data/user/`, and `instances_train2017.json`, which only `01_download.py` needs.
+
+On the receiving PC (Python 3.12 or newer):
+
+```bash
+cd ir_image_search
+python -m venv .venv && .venv/Scripts/activate   # Windows; use .venv/bin/activate elsewhere
+pip install -r requirements.txt
+python -m pytest -m "not models"       # should all pass
+python app/app.py                      # demo on http://127.0.0.1:7860
+python scripts/05_evaluate.py          # reproduces results/summary.csv
+```
+
+The first search downloads the CLIP and DINOv2 weights from Hugging Face (about 700 MB, once). To rerun `01_download.py`, first fetch the annotations zip as in *Getting started*.
+
+## Demo
+
+- Upload a photo, optionally crop it, and switch between **Semantic** and **Similar** search.
+- Results appear as a thumbnail grid. Semantic results show the tags they share with the query.
+- Mark results as relevant to re-run the query with Rocchio feedback.
+- A **hard queries** panel lists the evaluation queries with the lowest AP, for inspecting failures.
+
+## Roadmap
+
+- [ ] Week 1: download COCO; CLIP and DINOv2 embeddings, pHash, FAISS Flat; both tasks searchable from a script
+- [ ] Week 2: CLIP tags into the inverted index, BM25, RRF fusion; synthetic edit queries; web demo
+- [ ] Week 3: Rocchio, alpha-QE, MMR; cluster pruning, IVF-PQ and HNSW; evaluation scripts; phone photos and judging
+- [ ] Week 4: full experiments, ROxford/RParis supplementary run, hard-query failure analysis, report and demo
+
+If time runs short, the ROxford/RParis run, HNSW and MMR are cut first. Dense retrieval for both tasks and its evaluation always ship.
+
+## Team
+
+| Member | Responsibilities |
 |---|---|
-| 陳長壻 | semantic search：tag + BM25（`src/text`、`src/models/tagger.py`）、RRF、Rocchio、alpha-QE、MMR（`src/rerank`）、評估 |
-| 鄧存正 | similar search：DINOv2、pHash、edit（`src/data/edits.py`）、FAISS 與 cluster pruning（`src/index`）、demo（`app/`）、評估 |
-| 共同 | 資料準備（`02`）、共用 pipeline（`src/pipeline.py`、`src/schema.py`）、人工標註（`06`）、期末報告 |
+| 陳長壻 | Semantic search: CLIP tags, inverted index and BM25 over tags, RRF fusion, Rocchio and alpha-QE, MMR; semantic evaluation |
+| 鄧存正 | Similar-image search: DINOv2 and pHash, synthetic edits; FAISS and cluster pruning; web demo; similarity and efficiency evaluation |
+
+Shared: data preprocessing, `src/pipeline.py` and `src/schema.py`, phone-photo judging, final report.
+
+## Acknowledgements
+
+- [ImgSearch](https://github.com/seamile/ImgSearch), the reference project, which showed that CLIP embeddings plus nearest-neighbor search work on a single machine.
+- [OpenCLIP](https://github.com/mlfoundations/open_clip), [DINOv2](https://github.com/facebookresearch/dinov2), [FAISS](https://github.com/facebookresearch/faiss), [ImageHash](https://github.com/JohannesBuchner/imagehash).
+- Ranking, inexact top-k and evaluation methods follow Manning, Raghavan and Schütze, *Introduction to Information Retrieval*.
+
+## License
+
+To be decided. Datasets keep their own licenses (see the table above); the images are not redistributed in this repository.

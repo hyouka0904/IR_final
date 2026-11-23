@@ -1,73 +1,85 @@
-"""指標：與 pytrec_eval（trec_eval 的 Python 綁定）逐 query 比對。"""
+import math
+
 import numpy as np
 import pytest
 
-from src.data.sets import CategoryQrels, SparseQrels
-from src.eval.metrics import METRICS, category_coverage, cohen_kappa, mean_metrics, query_metrics, recall_loss
-from src.eval.trec import to_pytrec
-
-pytrec_eval = pytest.importorskip("pytrec_eval")
-TREC_NAMES = {"ndcg_cut_10": "ndcg_cut_10", "map": "map", "recall_1": "recall_1", "recall_10": "recall_10", "recip_rank": "recip_rank"}
+from src.metrics import (average_precision, mean_ignore_nan, ndcg_at_k, reciprocal_rank,
+                         recall_at_k, semantic_gains)
+from src.trec import write_qrels, write_run
 
 
-def _compare(qrels, rankings, n_docs):
-    doc_ids = [f"d{i}" for i in range(n_docs)]
-    q_ids = [f"q{i}" for i in range(len(rankings))]
-    qrel, run = to_pytrec(q_ids, rankings, qrels, doc_ids)
-    ev = pytrec_eval.RelevanceEvaluator(qrel, {"ndcg_cut.10", "map", "recall.1,10", "recip_rank"})
-    ref = ev.evaluate(run)
-    for qi, qid in enumerate(q_ids):
-        ours = query_metrics(rankings[qi], qrels.grades(qi))
-        if qid not in ref:
-            assert all(np.isnan(v) for v in ours.values())
-            continue
-        for m in METRICS:
-            assert ours[m] == pytest.approx(ref[qid][TREC_NAMES[m]], abs=1e-6), (qid, m)
+def test_semantic_gains_share_of_query_categories():
+    gains = semantic_gains({1, 2}, [{1}, {1, 2, 3}, {4}])
+    np.testing.assert_allclose(gains, [0.5, 1.0, 0.0])
 
 
-def test_matches_trec_eval_graded():
-    rng = np.random.default_rng(0)
-    n_docs, n_cat = 300, 6
-    q_cats = (rng.random((25, n_cat)) < 0.3).astype(np.uint8)
-    g_cats = (rng.random((n_docs, n_cat)) < 0.2).astype(np.uint8)
-    qrels = CategoryQrels(q_cats, g_cats, max_grade=2)
-    rankings = [rng.permutation(n_docs)[:rng.integers(5, 120)] for _ in range(25)]
-    _compare(qrels, rankings, n_docs)
+def test_semantic_gains_empty_query_is_zero():
+    np.testing.assert_allclose(semantic_gains(set(), [{1}, {2}]), [0.0, 0.0])
 
 
-def test_matches_trec_eval_single_relevant():
-    rng = np.random.default_rng(1)
-    n_docs = 200
-    rels = [{int(rng.integers(n_docs)): 1} for _ in range(30)]
-    rankings = [rng.permutation(n_docs)[:50] for _ in range(30)]
-    _compare(SparseQrels(rels, n_docs), rankings, n_docs)
+def test_ndcg_perfect_is_one():
+    assert ndcg_at_k([1.0, 0.5, 0.0], [0.0, 0.5, 1.0], 3) == pytest.approx(1.0)
 
 
-def test_hand_example():
-    grades = np.array([0, 2, 1, 0, 0])
-    m = query_metrics(np.array([0, 1, 3, 2]), grades)
-    assert m["map"] == pytest.approx((1 / 2 + 2 / 4) / 2)
-    assert m["recip_rank"] == pytest.approx(0.5)
-    assert m["recall_1"] == 0 and m["recall_10"] == 1
-    dcg = 2 / np.log2(3) + 1 / np.log2(5)
-    idcg = 2 / np.log2(2) + 1 / np.log2(3)
-    assert m["ndcg_cut_10"] == pytest.approx(dcg / idcg)
+def test_ndcg_known_value():
+    assert ndcg_at_k([0.0, 1.0], [1.0, 0.0], 2) == pytest.approx(1 / math.log2(3))
 
 
-def test_no_relevant_is_skipped_in_mean():
-    a = query_metrics(np.array([0]), np.array([1, 0]))
-    b = query_metrics(np.array([0]), np.array([0, 0]))
-    assert mean_metrics([a, b])["map"] == pytest.approx(1.0)
+def test_ndcg_truncates_at_k():
+    # relevant item at rank 3 is outside k=2
+    assert ndcg_at_k([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 2) == 0.0
 
 
-def test_coverage_recall_loss_kappa():
-    g_cats = np.array([[1, 0, 0], [1, 0, 0], [0, 1, 0]])
-    assert category_coverage(np.array([0, 1]), np.array([1, 1, 0]), g_cats, k=2) == 0.5
-    assert category_coverage(np.array([0, 2]), np.array([1, 1, 0]), g_cats, k=2) == 1.0
-    assert recall_loss([np.array([1, 2, -1])], [np.array([1, 2, 3])]) == pytest.approx(1 / 3)
-    assert cohen_kappa([0, 1, 1, 0], [0, 1, 1, 0]) == 1.0
-    # 教科書範例：觀察一致 0.7、期望一致 0.5 → kappa 0.4
-    a = [1] * 20 + [1] * 5 + [0] * 10 + [0] * 15
-    b = [1] * 20 + [0] * 5 + [1] * 10 + [0] * 15
-    assert cohen_kappa(a, b) == pytest.approx(0.4)
-    assert cohen_kappa([0, 1, 2], [0, 1, 2], "linear") == 1.0
+def test_ndcg_no_relevant_is_nan():
+    assert math.isnan(ndcg_at_k([0.0, 0.0], [0.0, 0.0], 2))
+
+
+def test_ap_known_value():
+    assert average_precision([True, False, True], 3) == pytest.approx((1 + 2 / 3) / 3)
+
+
+def test_ap_zero_relevant_nan():
+    assert math.isnan(average_precision([False, False], 0))
+
+
+def test_recall_and_rr():
+    ranked = [5, 7, 9]
+    assert recall_at_k(ranked, 7, 1) == 0.0
+    assert recall_at_k(ranked, 7, 2) == 1.0
+    assert reciprocal_rank(ranked, 9) == pytest.approx(1 / 3)
+    assert reciprocal_rank(ranked, 42) == 0.0
+
+
+def test_mean_ignore_nan_counts_skipped():
+    mean, skipped = mean_ignore_nan([1.0, float("nan"), 0.0])
+    assert mean == pytest.approx(0.5) and skipped == 1
+
+
+def test_mean_ignore_nan_all_nan():
+    mean, skipped = mean_ignore_nan([float("nan")])
+    assert math.isnan(mean) and skipped == 1
+
+
+def test_write_run_format(tmp_path):
+    p = tmp_path / "x.run"
+    write_run(p, [("q1", 42, 1, 0.9), ("q1", 7, 2, 0.25)], tag="clip")
+    assert p.read_text().splitlines() == ["q1 Q0 42 1 0.900000 clip",
+                                          "q1 Q0 7 2 0.250000 clip"]
+
+
+def test_write_qrels_format(tmp_path):
+    p = tmp_path / "x.qrels"
+    write_qrels(p, [("q1", 42, 3)])
+    assert p.read_text().splitlines() == ["q1 0 42 3"]
+
+
+def test_write_run_breaks_ties_in_rank_order(tmp_path):
+    # trec_eval re-sorts by score (ties by docno), so printed scores must strictly decrease
+    p = tmp_path / "t.run"
+    write_run(p, [("q", 2, 1, -3.0), ("q", 9, 2, -3.0), ("q", 4, 3, -3.0000001),
+                  ("r", 5, 1, 0.5)], tag="phash")
+    lines = [l.split() for l in p.read_text().splitlines()]
+    q_scores = [float(l[4]) for l in lines if l[0] == "q"]
+    assert q_scores == sorted(q_scores, reverse=True) and len(set(q_scores)) == 3
+    assert q_scores[0] == -3.0 and abs(q_scores[2] + 3.0) < 1e-5
+    assert lines[3][4] == "0.500000"  # a new query starts fresh

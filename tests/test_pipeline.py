@@ -1,126 +1,94 @@
-"""共用 pipeline 與評估流程：以合成的小圖庫與快取特徵跑完整流程（不需要 torch 與模型權重）。"""
-import copy
-
 import numpy as np
 import pytest
+from PIL import Image
 
-from src import features
 from src.config import load_config
-from src.data.sets import CategoryQrels, load_set, save_set
-from src.eval.protocol import frozen_ranking, run_queries, simulate_feedback
-from src.features import TagSet
-from src.index import faiss_index
-from src.pipeline import Pipeline, parse_config_id, text_index_path, without_post
+from src.embed import embed_paths
+from src.index import FlatIndex
+from src.pipeline import SearchEngine
 from src.schema import SearchRequest
-from src.text.inverted_index import InvertedIndex
 
-N, D, V, NQ = 80, 16, 12, 6
-
-
-@pytest.fixture(scope="module")
-def env(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("cache")
-    cfg = copy.deepcopy(load_config())
-    cfg["paths"]["cache_root"] = str(tmp)
-    vocab = [f"concept {i}" for i in range(V)]
-    (tmp / "vocab.txt").write_text("\n".join(vocab))
-    cfg["tags"].update(vocab=str(tmp / "vocab.txt"), top_n=4)
-    cfg["index"]["ivfpq"].update(nlist=4, m=4, nbits=4, nprobe=4)
-    cfg["mmr"]["depth"] = 20
-    rng = np.random.default_rng(0)
-
-    save_set(str(tmp), "g", [{"id": f"g{i}", "path": f"g{i}.jpg"} for i in range(N)], {"kind": "gallery"})
-    db = rng.standard_normal((N, D)).astype(np.float32)
-    db /= np.linalg.norm(db, axis=1, keepdims=True)
-    (tmp / "features" / "g").mkdir(parents=True)
-    np.save(features.feature_path(str(tmp), "g", "clip"), db)
-    ph = rng.integers(0, 255, (N, 8), dtype=np.uint8)
-    np.save(features.feature_path(str(tmp), "g", "phash"), ph)
-    top = np.stack([rng.permutation(V)[:4] for _ in range(N)]).astype(np.int32)
-    probs = np.sort(rng.random((N, 4)).astype(np.float32), axis=1)[:, ::-1] / 2
-    TagSet.save(str(tmp), "g", top, probs, cfg["tags"])
-    tags = TagSet.load(str(tmp), "g", vocab, cfg["tags"])
-    import os
-    os.makedirs(os.path.dirname(text_index_path(str(tmp), "g")))
-    InvertedIndex.build([tags.terms(i) for i in range(N)]).save(text_index_path(str(tmp), "g"))
-    for kind in faiss_index.INDEX_KINDS:
-        faiss_index.save_index(faiss_index.build_index(kind, db, cfg), faiss_index.index_file(str(tmp), "g", "clip", kind))
-    faiss_index.save_index(faiss_index.build_index("flat", ph, cfg), faiss_index.index_file(str(tmp), "g", "phash", "flat"))
-
-    # query：圖庫圖片加一點雜訊；第 0 個 query 排除自己（模擬 Holidays）
-    qidx = list(range(NQ))
-    save_set(str(tmp), "q", [{"id": f"q{i}", "path": "x", **({"exclude_idx": 0} if i == 0 else {})} for i in qidx],
-             {"kind": "queries", "gallery": "g"})
-    q = db[qidx] + 0.05 * rng.standard_normal((NQ, D)).astype(np.float32)
-    q /= np.linalg.norm(q, axis=1, keepdims=True)
-    qfeats = [{"clip": q[i], "phash": ph[i], "tags": (top[i], probs[i])} for i in qidx]
-    g_cats = (rng.random((N, 5)) < 0.3).astype(np.uint8)
-    qrels = CategoryQrels(g_cats[qidx], g_cats, 2)
-    return Pipeline("g", cfg), load_set(str(tmp), "q"), qfeats, qrels
+COLORS = {1: (250, 0, 0), 2: (0, 250, 0), 3: (0, 0, 250), 4: (200, 200, 0)}
 
 
-CONFIGS = ["clip-flat-none", "clip-hnsw-none", "clip-ivfpq-none", "clip-cp-none", "phash-flat-none", "bm25-inv-none",
-           "clip+bm25-flat-none", "clip-flat-aqe", "clip-flat-mmr", "clip+bm25-flat-aqe+mmr"]
+class MeanColorEncoder:
+    """Test double: a unit vector of the mean RGB color, robust to most edits."""
+    metric = "ip"
+
+    def __init__(self, name="fake"):
+        self.name = name
+
+    def encode(self, images):
+        v = np.array([np.asarray(im.convert("RGB"), dtype=np.float32).mean(axis=(0, 1)) + 1.0
+                      for im in images], dtype=np.float32)
+        return v / np.linalg.norm(v, axis=1, keepdims=True)
 
 
-def test_parse_config_id():
-    assert parse_config_id("siglip+bm25-flat-aqe+mmr")["vec"] == "siglip"
-    assert parse_config_id("bm25-inv-none")["vec"] is None
-    for bad in ["bm25-flat-none", "phash-hnsw-none", "phash-flat-aqe", "clip-flat-mmr+aqe", "bm25-inv-mmr", "foo-flat-none", "clip-flat"]:
-        with pytest.raises(ValueError):
-            parse_config_id(bad)
-    assert without_post("clip-flat-aqe+rocchio", "rocchio") == "clip-flat-aqe"
-    assert without_post("clip-flat-rocchio", "rocchio") == "clip-flat-none"
+def _engine(cfg, names=("clip", "dinov2")):
+    imgs = [Image.new("RGB", (32, 32), c) for c in COLORS.values()]
+    ids = np.array(list(COLORS))
+    encoders, indexes = {}, {}
+    for n in names:
+        enc = MeanColorEncoder(n)
+        encoders[n] = enc
+        indexes[n] = FlatIndex.build(enc.encode(imgs), ids, enc.metric)
+    return SearchEngine(cfg, encoders, indexes)
 
 
-@pytest.mark.parametrize("cid", CONFIGS)
-def test_search(env, cid):
-    pipe, queries, qfeats, _ = env
-    res = pipe.search(SearchRequest(cid, k=10), qfeats[1])
-    assert 0 < len(res.ids) <= 10 and len(set(res.ids.tolist())) == len(res.ids)
-    assert res.ids.min() >= 0 and len(res.scores) == len(res.ids)
-    assert "search" in res.latency_ms and "embed" not in res.latency_ms
-    if cid in ("clip-flat-none", "clip-hnsw-none", "phash-flat-none"):
-        assert res.ids[0] == 1                       # 加了雜訊的自己應排第一
-    if "bm25" in cid:
-        assert res.query_tags is not None and len(res.query_tags) == 4
+@pytest.fixture
+def cfg():
+    cfg = load_config()
+    cfg["tasks"]["semantic"]["representation"] = "clip"  # this gallery has no tag index
+    return cfg
 
 
-def test_exclude(env):
-    pipe, _, qfeats, _ = env
-    res = pipe.search(SearchRequest("clip-flat-none", k=N, exclude=[0]), qfeats[0])
-    assert 0 not in res.ids.tolist() and len(res.ids) == N - 1
+def test_embed_paths_shape(tmp_path):
+    paths = []
+    for i, c in COLORS.items():
+        p = tmp_path / f"{i}.png"
+        Image.new("RGB", (900, 40), c).save(p)
+        paths.append(p)
+    v = embed_paths(MeanColorEncoder(), paths, batch_size=3, max_side=512)
+    assert v.shape == (4, 3) and v.dtype == np.float32
 
 
-def test_rocchio_feedback_changes_query(env):
-    pipe, _, qfeats, _ = env
-    base = pipe.search(SearchRequest("clip-flat-rocchio", k=10), qfeats[1])
-    assert base.extra["rocchio"] == "skipped: no feedback"
-    fb = pipe.search(SearchRequest("clip-flat-rocchio", k=10, feedback=([50, 51], [1])), qfeats[1])
-    assert not np.array_equal(base.extra["query_vector"], fb.extra["query_vector"])
+def test_search_returns_k_ranked_results(cfg):
+    resp = _engine(cfg).search(SearchRequest(Image.new("RGB", (20, 20), (0, 240, 0)),
+                                             task="similar", k=3))
+    assert [r.rank for r in resp.results] == [1, 2, 3]
+    assert resp.results[0].image_id == 2
+    scores = [r.score for r in resp.results]
+    assert scores == sorted(scores, reverse=True)
 
 
-def test_matched_tags(env):
-    pipe, _, qfeats, _ = env
-    res = pipe.search(SearchRequest("bm25-inv-none", k=5), qfeats[2])
-    terms = res.extra["query_terms"]
-    assert pipe.matched_tags(terms, int(res.ids[0]))      # 第一名至少有一個共同 tag
+def test_search_k_larger_than_gallery(cfg):
+    resp = _engine(cfg).search(SearchRequest(Image.new("RGB", (8, 8)), task="similar", k=50))
+    assert len(resp.results) == 4
 
 
-def test_feedback_protocol():
-    grades = np.array([0, 2, 0, 1, 0])
-    assert simulate_feedback(np.array([0, 1, 2, 3]), grades, 3, 1) == ([1], [0, 2])
-    assert frozen_ranking(np.array([4, 3, 2]), np.array([1, 4, 0, 3]), 2, 4).tolist() == [4, 3, 1, 0]
+def test_search_uses_task_default_representation(cfg):
+    eng = _engine(cfg)
+    img = Image.new("RGB", (8, 8))
+    assert eng.search(SearchRequest(img, task="semantic")).representation == "clip"
+    assert eng.search(SearchRequest(img, task="similar")).representation == "dinov2"
+    assert eng.search(SearchRequest(img, task="similar", representation="clip")
+                      ).representation == "clip"
 
 
-@pytest.mark.parametrize("cid", ["clip-flat-none", "clip-flat-rocchio", "clip+bm25-flat-mmr"])
-def test_run_queries(env, cid):
-    pipe, queries, qfeats, qrels = env
-    rankings, per_query, lat = run_queries(pipe, queries, cid, qfeats, qrels, depth=30)
-    assert len(rankings) == len(per_query) == len(lat) == NQ
-    assert 0 not in rankings[0].tolist()                   # exclude_idx 生效
-    assert all("cat_coverage_10" in m and "ndcg_cut_10" in m for m in per_query)
-    if cid == "clip-flat-rocchio":
-        init, _, _ = run_queries(pipe, queries, "clip-flat-none", qfeats, qrels, depth=30)
-        d = pipe.cfg["rocchio"]["feedback_depth"]
-        assert all(np.array_equal(a[:d], b[:d]) for a, b in zip(init, rankings))   # frozen：前 d 名不變
+def test_search_applies_crop(cfg):
+    img = Image.new("RGB", (40, 20), (250, 0, 0))
+    img.paste((0, 0, 250), (20, 0, 40, 20))  # right half blue
+    resp = _engine(cfg).search(SearchRequest(img, task="similar", crop=(20, 0, 40, 20)))
+    assert resp.results[0].image_id == 3
+
+
+def test_search_records_three_timings(cfg):
+    resp = _engine(cfg).search(SearchRequest(Image.new("RGB", (8, 8)), task="semantic"))
+    assert set(resp.timings_ms) == {"embed", "search", "rerank"}
+    assert all(v >= 0 for v in resp.timings_ms.values())
+
+
+def test_unknown_representation_raises(cfg):
+    with pytest.raises(ValueError):
+        _engine(cfg).search(SearchRequest(Image.new("RGB", (8, 8)), task="semantic",
+                                          representation="siglip"))

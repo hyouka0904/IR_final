@@ -1,17 +1,21 @@
-"""讀取 configs/default.yaml。"""
+"""Load configs/default.yaml; every tunable parameter comes from here."""
 from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "configs" / "default.yaml"
 
 
-def load_config(path: str | Path | None = None) -> dict:
-    with open(path or DEFAULT_CONFIG, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    # 相對路徑一律以 repo 根目錄為基準，腳本從哪裡執行都一樣
-    for key, value in cfg["paths"].items():
-        p = Path(value)
-        cfg["paths"][key] = str(p if p.is_absolute() else ROOT / p)
-    return cfg
+def load_config(path: str | Path = DEFAULT_CONFIG) -> dict:
+    path = Path(path)
+    if not path.is_absolute() and not path.exists():
+        path = ROOT / path
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def resolve_path(cfg: dict, key: str) -> Path:
+    """Absolute path for cfg['paths'][key], relative paths taken from the repo root."""
+    p = Path(cfg["paths"][key])
+    return p if p.is_absolute() else ROOT / p

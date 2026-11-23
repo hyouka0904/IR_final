@@ -1,237 +1,178 @@
-"""線上檢索流程（README 3.2），評估腳本與 demo 共用同一份。
-
-config_id = {method}-{index}-{post}
-  method : clip | siglip | dinov2 | phash | bm25 | {clip|siglip|dinov2}+bm25
-  index  : flat | hnsw | ivfpq | cp（向量部分）；bm25 單獨使用時為 inv；phash 只有 flat
-  post   : none，或 aqe / rocchio / mmr 以 + 串接（依此順序執行），只能用在向量模型
-
-延遲分三段：
-  embed  ：抽 query 特徵（向量、pHash、CLIP tag）；評估時改用快取特徵，此段由 03 腳本另外量測
-  search ：索引搜尋、BM25、RRF 融合
-  rerank ：alpha-QE、Rocchio（擴展 query 後重搜）、MMR
-"""
-import os
+"""Online search, shared by evaluation, the demo and the pairs script."""
+import time
 
 import numpy as np
 from PIL import Image
 
-from src import features
-from src.data.sets import load_set
-from src.eval.metrics import StageTimer
-from src.index import faiss_index
-from src.models.names import VECTOR_MODELS
-from src.preprocess.crop import crop_user_box
-from src.rerank.aqe import alpha_qe
-from src.rerank.mmr import mmr
-from src.rerank.rocchio import rocchio
-from src.rerank.rrf import rrf
-from src.schema import SearchRequest, SearchResult
-from src.text.bm25 import BM25
-from src.text.inverted_index import InvertedIndex
+from src.config import resolve_path
+from src.encoders import Encoder, get_encoder
+from src.index import FlatIndex
+from src.preprocess import preprocess
+from src.rerank import rrf, shared_tags
+from src.schema import SearchRequest, SearchResponse, SearchResult
+from src.sparse.tag_index import TagIndex
+from src.tagging import Tagger
 
-POSTS = ("aqe", "rocchio", "mmr")
-METHODS = (*VECTOR_MODELS, "phash", "bm25", *(f"{m}+bm25" for m in VECTOR_MODELS))
+DENSE = ("clip", "dinov2", "phash")
+REPRESENTATIONS = ("clip", "dinov2", "phash", "tags", "fusion", "tags_nococo", "fusion_nococo")
+_FUSION = {"fusion": "tags", "fusion_nococo": "tags_nococo"}
 
 
-def parse_config_id(config_id: str) -> dict:
-    try:
-        method, index, post = config_id.split("-")
-    except ValueError:
-        raise ValueError(f"Invalid config_id: {config_id}") from None
-    parts = method.split("+")
-    vec = next((p for p in parts if p != "bm25"), None)
-    text = "bm25" in parts
-    steps = [] if post == "none" else post.split("+")
-    ok = (method in METHODS
-          and (index == "inv" if vec is None else index in faiss_index.INDEX_KINDS)
-          and (vec != "phash" or (index == "flat" and not steps))
-          and all(s in POSTS for s in steps) and len(set(steps)) == len(steps)
-          and steps == sorted(steps, key=POSTS.index)
-          and (not steps or vec in VECTOR_MODELS))
-    if not ok:
-        raise ValueError(f"Invalid config_id: {config_id}")
-    return {"method": method, "vec": vec, "text": text, "index": index, "post": post,
-            "aqe": "aqe" in steps, "rocchio": "rocchio" in steps, "mmr": "mmr" in steps}
+def tag_variant(rep: str) -> str | None:
+    """The tag cache a representation reads: fusion -> tags, fusion_nococo -> tags_nococo."""
+    if rep in _FUSION:
+        return _FUSION[rep]
+    return rep if rep.startswith("tags") else None
 
 
-def without_post(config_id: str, step: str) -> str:
-    """去掉某個後處理步驟，例如 clip-flat-aqe+rocchio → clip-flat-aqe（Rocchio 的初次排序）。"""
-    method, index, post = config_id.split("-")
-    steps = [s for s in post.split("+") if s not in (step, "none")]
-    return f"{method}-{index}-{'+'.join(steps) or 'none'}"
-
-
-def text_index_path(cache_root: str, gallery: str) -> str:
-    return os.path.join(cache_root, "text", gallery, "tags_index.pkl")
-
-
-class Pipeline:
-    """單一圖庫的檢索流程。特徵、索引、encoder 都在第一次用到時才載入。"""
-
-    def __init__(self, gallery: str, cfg: dict, device: str = "cpu"):
+class SearchEngine:
+    def __init__(self, cfg: dict, encoders: dict[str, Encoder], indexes: dict[str, FlatIndex],
+                 load_encoders: bool = False, taggers: dict[str, Tagger] | None = None,
+                 tag_indexes: dict[str, TagIndex] | None = None):
         self.cfg = cfg
-        self.device = device
-        self.cache_root = cfg["paths"]["cache_root"]
-        self.gallery = load_set(self.cache_root, gallery)
-        self.name = gallery
-        self._db, self._indexes, self._encoders = {}, {}, {}
-        self._bm25 = self._vocab = self._text_embs = self._tags = None
+        self.encoders = dict(encoders)
+        self.indexes = dict(indexes)
+        self.taggers = dict(taggers or {})
+        self.tag_indexes = dict(tag_indexes or {})
+        self._load_encoders = load_encoders
 
-    # ---------- 延遲載入 ----------
+    @classmethod
+    def from_cache(cls, cfg: dict, representations: list[str] | None = None) -> "SearchEngine":
+        """Load every cached dense index and tag variant (or only those `representations` need)."""
+        cache = resolve_path(cfg, "cache")
+        wanted = set(representations or REPRESENTATIONS)
+        dense = {r for r in DENSE if r in wanted}
+        variants = {tag_variant(r) for r in wanted} - {None}
+        if wanted & set(_FUSION):
+            dense.add("clip")  # fusion reads the clip kNN line
+        indexes = {r: FlatIndex.load(cache / r / "flat") for r in sorted(dense)
+                   if (cache / r / "flat" / "meta.json").exists()}
+        taggers, tag_indexes = {}, {}
+        k1, b = cfg["bm25"]["k1"], cfg["bm25"]["b"]
+        for v in cfg["tags"]["variants"]:
+            if v in variants and (cache / v / "postings.txt").exists():
+                taggers[v] = Tagger.load(cache / v, cfg)
+                tag_indexes[v] = TagIndex.load(cache / v, k1, b)
+        return cls(cfg, {}, indexes, load_encoders=True, taggers=taggers, tag_indexes=tag_indexes)
 
-    def db_features(self, rep: str) -> np.ndarray:
-        if rep not in self._db:
-            self._db[rep] = np.load(features.feature_path(self.cache_root, self.name, rep))
-        return self._db[rep]
+    def encoder(self, rep: str) -> Encoder:
+        if rep not in self.encoders and self._load_encoders:
+            self.encoders[rep] = get_encoder(rep, self.cfg)
+        return self.encoders[rep]
 
-    def index(self, rep: str, kind: str):
-        key = (rep, kind)
-        if key not in self._indexes:
-            path = faiss_index.index_file(self.cache_root, self.name, rep, kind)
-            self._indexes[key] = faiss_index.load_index(path, kind, self.cfg, binary=rep == "phash")
-        return self._indexes[key]
+    # ---- what is loaded -------------------------------------------------
+    def _has_clip_encoder(self) -> bool:
+        return "clip" in self.encoders or self._load_encoders
 
-    def encoder(self, model: str):
-        if model not in self._encoders:
-            from src.models.encoders import load_encoder
-            self._encoders[model] = load_encoder(model, self.cfg, self.device)
-        return self._encoders[model]
-
-    @property
-    def bm25(self) -> BM25:
-        if self._bm25 is None:
-            c = self.cfg["bm25"]
-            self._bm25 = BM25(InvertedIndex.load(text_index_path(self.cache_root, self.name)), c["k1"], c["b"], c["k3"])
-        return self._bm25
-
-    @property
-    def vocab(self) -> list[str]:
-        if self._vocab is None:
-            from src.models.tagger import load_vocab
-            self._vocab = load_vocab(self.cfg["tags"]["vocab"])
-        return self._vocab
-
-    @property
-    def gallery_tags(self) -> features.TagSet:
-        if self._tags is None:
-            self._tags = features.TagSet.load(self.cache_root, self.name, self.vocab, self.cfg["tags"])
-        return self._tags
-
-    def text_embs(self) -> np.ndarray:
-        if self._text_embs is None:
-            from src.models import tagger
-            tcfg = self.cfg["tags"]
-            path = features.text_emb_path(self.cache_root, tcfg)
-            if os.path.exists(path):
-                self._text_embs = np.load(path)
+    def available(self) -> list[str]:
+        """Representations whose parts are all loaded, in REPRESENTATIONS order."""
+        out = []
+        for rep in REPRESENTATIONS:
+            v = tag_variant(rep)
+            if v is None:
+                ok = rep in self.indexes
             else:
-                self._text_embs = tagger.text_embeddings(self.encoder(tcfg["model"]), self.vocab, tcfg["templates"])
-        return self._text_embs
+                ok = v in self.taggers and v in self.tag_indexes and self._has_clip_encoder()
+                if rep in _FUSION:
+                    ok = ok and "clip" in self.indexes
+            if ok:
+                out.append(rep)
+        return out
 
-    # ---------- query 特徵 ----------
+    def gallery_ids(self, rep: str) -> set[int]:
+        """Image ids that `rep` searches over."""
+        v = tag_variant(rep)
+        if v is None:
+            return set(int(i) for i in self.indexes[rep].ids)
+        tag_ids = set(self.tag_indexes[v].ids)
+        if rep in _FUSION:
+            clip_ids = set(int(i) for i in self.indexes["clip"].ids)
+            if clip_ids != tag_ids:
+                raise ValueError(f"{rep}: the clip index ({len(clip_ids)} images) and the {v} index "
+                                 f"({len(tag_ids)} images) differ; rerun 03_tag.py")
+        return tag_ids
 
-    def prepare_query(self, request: SearchRequest) -> Image.Image:
-        if request.image is None:
-            raise ValueError("SearchRequest needs an image (or cached query features)")
-        image = request.image.convert("RGB")
-        return crop_user_box(image, request.user_box) if request.user_box is not None else image
+    # ---- search ---------------------------------------------------------
+    def _check(self, task: str, rep: str) -> None:
+        allowed = self.cfg["tasks"][task]["allowed"]
+        if rep not in allowed:
+            raise ValueError(f"representation {rep!r} is not allowed for the {task} task; "
+                             f"allowed: {', '.join(allowed)}")
+        if rep not in self.available():
+            raise ValueError(f"representation {rep!r} is not loaded; "
+                             f"available: {', '.join(self.available())}")
 
-    def query_features(self, image: Image.Image, c: dict) -> dict:
-        """{rep: 向量或 pHash, "tags": (top, probs)}，只算這組設定用得到的。"""
-        from src.models import phash, tagger
-        q = {}
-        if c["vec"] == "phash":
-            q["phash"] = phash.phash_bits(image, self.cfg["models"]["phash"]["hash_size"])
-        elif c["vec"] is not None:
-            q[c["vec"]] = self.encoder(c["vec"]).encode([image])[0]
-        if c["text"]:
-            tcfg = self.cfg["tags"]
-            enc = self.encoder(tcfg["model"])
-            emb = q[tcfg["model"]] if tcfg["model"] in q else enc.encode([image])[0]
-            top, probs = tagger.tag_images(emb[None], self.text_embs(), tcfg["top_n"], tagger.logit_scale(enc))
-            q["tags"] = (top[0], probs[0])
-        return q
+    def search(self, req: SearchRequest) -> SearchResponse:
+        rep = req.representation or self.cfg["tasks"][req.task]["representation"]
+        self._check(req.task, rep)
+        v = tag_variant(rep)
+        encoder = self.encoder("clip" if v else rep)  # lazy model load stays out of the timings
 
-    def tag_terms(self, tags) -> dict[str, int]:
-        from src.models.tagger import tag_terms
-        tcfg = self.cfg["tags"]
-        return tag_terms(tags[0], tags[1], self.vocab, tcfg["tf_mode"], tcfg["tf_scale"])
+        t0 = time.perf_counter()
+        img = preprocess(req.image, self.cfg["preprocess"]["max_side"], req.crop)
+        query = encoder.encode([img])
+        query_terms: list[str] = []
+        if v:
+            qtags = self.taggers[v].tag(query)[0]
+            qtf = {t: tf for t, _, tf in qtags}
+            query_terms = [t for t, _, _ in qtags]
+        t1 = time.perf_counter()
 
-    # ---------- 流程 ----------
-
-    def search(self, request: SearchRequest, query_feats: dict | None = None) -> SearchResult:
-        """query_feats：評估時傳入快取的 query 特徵，省略 embed 階段。"""
-        c = parse_config_id(request.config_id)
-        k = request.k or self.cfg["retrieval"]["k"]
-        exclude = np.asarray(request.exclude, dtype=np.int64)
-        timer = StageTimer()
-        image = None
-        if query_feats is None:
-            image = self.prepare_query(request)
-            with timer.stage("embed"):
-                query_feats = self.query_features(image, c)
-
-        # 多取 len(exclude) 名，過濾後仍有 k 名
-        depth = min(k + len(exclude), len(self.gallery))
-        keep = lambda ids, s: (ids[(ids >= 0) & ~np.isin(ids, exclude)], s[(ids >= 0) & ~np.isin(ids, exclude)])
-        rankings, vec_ids, vec_scores, extra = [], None, None, {}
-
-        # 1. 向量檢索（含 alpha-QE、Rocchio 的擴展 query 重搜）
-        if c["vec"] is not None:
-            rep = c["vec"]
-            q = query_feats[rep]
-            idx = self.index(rep, c["index"])
-            n_qe = self.cfg["aqe"]["n"]
-            with timer.stage("search"):
-                scores, ids = faiss_index.search(idx, q, max(depth, n_qe + len(exclude)))
-            vec_ids, vec_scores = keep(ids[0], scores[0])
-            if c["aqe"]:
-                with timer.stage("rerank"):
-                    a = self.cfg["aqe"]
-                    q = alpha_qe(q, self.db_features(rep), vec_ids, a["n"], a["alpha"])
-                    scores, ids = faiss_index.search(idx, q, depth)
-                    vec_ids, vec_scores = keep(ids[0], scores[0])
-            if c["rocchio"]:
-                if request.feedback is not None:
-                    with timer.stage("rerank"):
-                        r = self.cfg["rocchio"]
-                        q = rocchio(q, self.db_features(rep), *request.feedback, r["alpha"], r["beta"], r["gamma"])
-                        scores, ids = faiss_index.search(idx, q, depth)
-                        vec_ids, vec_scores = keep(ids[0], scores[0])
-                else:
-                    extra["rocchio"] = "skipped: no feedback"
-            rankings.append(vec_ids)
-            extra["query_vector"] = q
-
-        # 2. tag BM25
-        query_tags = None
-        if c["text"]:
-            with timer.stage("search"):
-                terms = self.tag_terms(query_feats["tags"])
-                txt_ids, txt_scores = keep(*self.bm25.search(terms, depth))
-            rankings.append(txt_ids)
-            top, probs = query_feats["tags"]
-            query_tags = [(self.vocab[i], float(p)) for i, p in zip(top, probs)]
-            extra["query_terms"] = terms
-
-        # 3. 融合
-        if c["vec"] is not None and c["text"]:
-            with timer.stage("search"):
-                ids, scores = rrf(rankings, self.cfg["rrf"]["k"])
-        elif c["text"]:
-            ids, scores = txt_ids, txt_scores
+        if v is None:
+            scores, ids = self.indexes[rep].search(query, req.k)
+            hits = list(zip(ids[0].tolist(), scores[0].tolist()))
+        elif rep not in _FUSION:
+            hits = self.tag_indexes[v].search(qtf, req.k)
         else:
-            ids, scores = vec_ids, vec_scores
+            depth = self.cfg["fusion"]["depth"]
+            _, clip_ids = self.indexes["clip"].search(query, depth)
+            tag_ids = [d for d, _ in self.tag_indexes[v].search(qtf, depth)]
+            hits = rrf([clip_ids[0].tolist(), tag_ids], self.cfg["fusion"]["rrf_k"])[:req.k]
+        results = []
+        for r, (i, s) in enumerate(hits):
+            shared = shared_tags(query_terms, self.tag_indexes[v].doc_terms(i)) if v else []
+            results.append(SearchResult(image_id=int(i), score=float(s), rank=r + 1,
+                                        shared_tags=shared))
+        t2 = time.perf_counter()  # building results (incl. shared tags) counts as search
 
-        # 4. MMR（用向量模型的 embedding 衡量結果之間的相似度）
-        if c["mmr"]:
-            with timer.stage("rerank"):
-                m = self.cfg["mmr"]
-                ids, scores = mmr(ids, scores, self.db_features(c["vec"]), m["lambda"], m["depth"])
+        # re-ranking (Rocchio / alpha-QE / MMR) arrives in week 3; timed as a stage already
+        t3 = time.perf_counter()
+        return SearchResponse(results=results, representation=rep,
+                              timings_ms={"embed": (t1 - t0) * 1e3, "search": (t2 - t1) * 1e3,
+                                          "rerank": (t3 - t2) * 1e3},
+                              query_tags=query_terms)
 
-        return SearchResult(request.config_id, ids[:k], np.asarray(scores[:k], dtype=np.float32), timer.as_dict(),
-                            query_image=image, query_tags=query_tags, extra=extra)
+    # ---- growing the gallery -------------------------------------------
+    def all_ids(self) -> set[int]:
+        """Every image id in any loaded index."""
+        ids = set()
+        for index in self.indexes.values():
+            ids |= set(int(i) for i in index.ids)
+        for index in self.tag_indexes.values():
+            ids |= set(index.ids)
+        return ids
 
-    def matched_tags(self, query_terms: dict[str, int], db_idx: int) -> list[str]:
-        """explainability：query 與某張圖庫圖片共有的 tag。"""
-        return [t.replace("_", " ") for t in self.bm25.index.matched_terms(query_terms, db_idx)]
+    def add_image(self, img: Image.Image, image_id: int | None = None) -> int:
+        """Add one image to every loaded dense index and tag index; returns its id.
+        New ids start at user.first_id and count up from the largest user id."""
+        existing = self.all_ids()
+        first = int(self.cfg["user"]["first_id"])
+        if image_id is None:
+            user_ids = [i for i in existing if i >= first]
+            image_id = max(user_ids) + 1 if user_ids else first
+        image_id = int(image_id)
+        if image_id in existing:
+            raise ValueError(f"image id {image_id} is already in the gallery")
+        img = preprocess(img, self.cfg["preprocess"]["max_side"])
+        vecs: dict[str, np.ndarray] = {}
+        for rep in self.indexes:
+            vecs[rep] = self.encoder(rep).encode([img])
+        if self.taggers and "clip" not in vecs:
+            vecs["clip"] = self.encoder("clip").encode([img])
+        for rep, index in self.indexes.items():
+            index.add(vecs[rep], np.array([image_id]))
+        for v, tagger in self.taggers.items():
+            if v in self.tag_indexes:
+                tags = tagger.tag(vecs["clip"])[0]
+                self.tag_indexes[v].add(image_id, [(t, tf) for t, _, tf in tags])
+        return image_id

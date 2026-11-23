@@ -1,6 +1,11 @@
-/data/
-/cache/
-/third_party/
-results/figures/*.png
+.venv/
+data/
+cache/
+results/runs/
+results/per_query/
 __pycache__/
-*.pyc
+.pytest_cache/
+.superpowers/
+*.part
+team27_hw*.zip
+dist/
