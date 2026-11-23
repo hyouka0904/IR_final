@@ -104,7 +104,7 @@ python app\app.py
 |---|---|
 | 01 的 Holidays 下載失敗 | 官方來源是 FTP，有些網路（例如校園網路）會擋。到 https://lear.inrialpes.fr/~jegou/data.php 手動下載 `jpg1.tar.gz`、`jpg2.tar.gz`，放到 `data\holidays\` 後重跑 01，會跳過下載直接解壓 |
 | 下載中斷 | 直接重跑，已完成的檔案會跳過（下載中的檔案以 `.part` 結尾，完成才改名） |
-| demo 啟動後打不開 `http://0.0.0.0:7860` | 瀏覽器請開 `http://localhost:7860`。Windows 防火牆跳出詢問時，只想本機使用可以按取消 |
+| demo 打不開 | 開 `http://127.0.0.1:7860`。要讓同網段的其他電腦連線，用 `python app\\app.py --host 0.0.0.0`。這時本機一樣開 `127.0.0.1`，別台開 `http://<你的 IP>:7860`，而 `0.0.0.0` 不是可以開的網址。Windows 防火牆跳出詢問時要允許。`--share` 會產生公開網址 |
 | 第一次跑 03 卡很久 | 正在下載 CLIP / SigLIP / DINOv2 權重（共數 GB），存在 `%USERPROFILE%\.cache` |
 | GPU 記憶體不足 | `python scripts\03_extract_features.py --batch-size 16`（或更小） |
 | 用 Excel 填 `judgments.csv` | 存檔時選「CSV UTF-8」或「CSV（逗號分隔）」都可以，06 都讀得到。不要改欄位名稱與順序 |
@@ -200,7 +200,7 @@ python scripts/05_run_eval.py               # 每個 query set 跑 eval.experime
 python scripts/05_run_eval.py --speed       # 索引比較（recall 損失、延遲、大小）
 python scripts/07_roxford_supplementary.py  # supplementary（需要 --with-roxford）
 
-python app/app.py                           # demo
+python app/app.py                           # demo：開 http://127.0.0.1:7860（--host 0.0.0.0 開放區網、--share 產生公開網址）
 ```
 
 輸出在 `results/{query_set}/`：

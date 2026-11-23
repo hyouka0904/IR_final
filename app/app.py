@@ -218,4 +218,11 @@ def build_app() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_app().launch(server_name="0.0.0.0")
+    import argparse
+    p = argparse.ArgumentParser()
+    # 預設只給本機用，印出的網址可以直接點開；要讓同網段的其他電腦連線再加 --host 0.0.0.0
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=7860)
+    p.add_argument("--share", action="store_true", help="產生 Gradio 的公開網址（給不在同一網段的人看）")
+    args = p.parse_args()
+    build_app().launch(server_name=args.host, server_port=args.port, share=args.share)
