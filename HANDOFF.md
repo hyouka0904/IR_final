@@ -57,6 +57,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 
 ## 重要決策
 
+- **程式碼流向**（2026-11-23）：sandbox 跑在使用者的 Linux 伺服器上。伺服器 host repo `git fetch sandbox-ir-final feat/zero-shot-search` → 在伺服器建置、開 demo（區網 / VPN）→ 伺服器 push 到 GitHub → Windows 從 GitHub pull。
 - **02 在 Windows 卡死**（2026-11-23）：`json.load` 整份 instances_train2017.json（約 450 MB）會因 segmentation polygon 吃掉數 GB 記憶體。`coco.load_instances` 改用 object_hook 在解析時丟掉 segmentation，只留需要的欄位，並存成 `instances_{split}.slim.json`，之後直接讀它。合成資料測試（243 MB、15 萬標註）峰值 1266 MB → 486 MB，重讀 0.5 秒。COCO 圖片下載加上 tqdm 進度條（原本 4 萬張下載期間沒有任何輸出，看起來像當掉）。README 的指令一律改用 `/`（使用者在 Linux 照抄 Windows 範例的 `scripts\01…` 失敗）。
 - **伺服器部署**（2026-11-23）：使用者改在 Linux 伺服器（GTX 1660 Ti 6 GB，driver CUDA 13.2）上建置，並透過區網 / VPN 開 demo。app 新增 `--auth 帳號:密碼`（或環境變數 `ZSIS_AUTH`），README 新增 4.4（`--host 0.0.0.0`、ufw、tmux）。CUDA 對照表註明 13.x 用 cu128。
 - **Demo 缺資料時的提示**（2026-11-23）：使用者還沒跑完 02–04 就開 demo，圖庫下拉選單是空的，按搜尋時 `Pipeline(None)` 丟出 TypeError。現在沒有圖庫時頁面頂端與終端機都會提示要先跑哪些腳本，搜尋時改成 gr.Error；特徵或索引檔缺少時（FileNotFoundError）也轉成 gr.Error，指出要跑 03 / 04。
