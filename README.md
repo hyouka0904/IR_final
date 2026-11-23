@@ -23,14 +23,22 @@
 conda create -n zsis python=3.11 -y
 conda activate zsis
 
-# PyTorch（CUDA 版本請依本機調整）
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# PyTorch >= 2.6（open_clip 新版的要求）；cu126 請依本機調整，見下表
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 # FAISS：一律用 CPU 版（HNSW 只支援 CPU，所有索引都在 CPU 上量延遲才公平）
 pip install faiss-cpu
 
 pip install -r requirements.txt
 pip install -r requirements-dev.txt   # 單元測試用（選用）
 ```
+
+| `nvidia-smi` 顯示的 CUDA Version | `--index-url` 結尾 |
+|---|---|
+| ≥ 12.8 | `cu128` |
+| 12.6、12.7 | `cu126` |
+| 12.4、12.5 | `cu124`，並指定版本：`pip install "torch==2.6.*" "torchvision==0.21.*" --index-url .../cu124` |
+| < 12.4 | 先更新 NVIDIA 驅動（`cu121` 最高只有 torch 2.5.1，不符合 open_clip 的要求） |
+| 沒有 NVIDIA 顯卡 | 拿掉 `--index-url`，裝 CPU 版 |
 
 DINOv2 透過 `torch.hub` 載入，第一次執行時會自動下載權重；CLIP / SigLIP 權重由 open_clip 下載。
 
@@ -62,8 +70,8 @@ conda activate zsis
 conda env config vars set PYTHONUTF8=1 HF_HUB_DISABLE_SYMLINKS_WARNING=1
 conda deactivate; conda activate zsis
 
-# PyTorch：cu121 / cu124 依 nvidia-smi 的 CUDA Version 選，不能高於它；沒有 NVIDIA 顯卡就拿掉 --index-url 那段，裝 CPU 版
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# PyTorch >= 2.6：cu126 依 nvidia-smi 的 CUDA Version 換成 1.2 表格中對應的版本
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 pip install faiss-cpu      # PyPI 有 Windows wheel；若安裝失敗改用 conda install -c pytorch faiss-cpu
 pip install -r requirements.txt
 pip install -r requirements-dev.txt   # 選用；pytrec_eval-terrier 若需要編譯而失敗，可以略過，不影響主流程
@@ -76,7 +84,8 @@ python -c "import torch, faiss, open_clip, imagehash; print(torch.__version__, t
 python -m pytest -q tests
 ```
 
-有 NVIDIA 顯卡但第一個值印出 `False`，代表裝到 CPU 版的 torch。先 `pip uninstall torch torchvision`，再用正確的 `--index-url` 重裝。
+- torch 版本要 ≥ 2.6。如果 pip 出現 `open-clip-torch ... requires torch>=2.6`，代表用了太舊的 `--index-url`（例如 `cu121`）。依 1.2 的表格換一個，重裝即可：`pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu126`。
+- 有 NVIDIA 顯卡但第二個值印出 `False`，代表裝到 CPU 版的 torch。先 `pip uninstall torch torchvision`，再用正確的 `--index-url` 重裝。
 
 **4. 執行**
 

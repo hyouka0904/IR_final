@@ -1,4 +1,4 @@
-# torch / torchvision / faiss-cpu 依 README 1.2 另外安裝（依 CUDA 版本而定）
+# torch>=2.6 / torchvision / faiss-cpu 依 README 1.2 另外安裝（依 CUDA 版本而定；新版 open_clip 需要 torch>=2.6）
 open_clip_torch>=2.23  # CLIP, SigLIP，以及 tag 詞彙表預設的 ImageNet-1k 類別名稱
 timm
 imagehash              # pHash baseline
