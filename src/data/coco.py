@@ -2,6 +2,7 @@
 
 目錄：
   data/coco/annotations/instances_{split}.json
+  data/coco/annotations/instances_{split}.slim.json   第一次讀取後產生，只留需要的欄位
   data/coco/{split}/{file_name}
 """
 import json
@@ -10,14 +11,48 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+from tqdm import tqdm
+
+IMAGE_KEYS = ("id", "file_name", "width", "height", "coco_url")
+ANN_KEYS = ("image_id", "category_id", "bbox", "area", "iscrowd")
+
+
+def _drop_segmentation(d: dict) -> dict:
+    # 每個 dict 解析完就呼叫；polygon 在這裡丟掉，不會整份留在記憶體裡
+    d.pop("segmentation", None)
+    return d
+
+
+def load_instances(path: str) -> dict:
+    """讀 instances_{split}.json，只留用得到的欄位。
+
+    train2017 的原始檔約 450 MB，整份 json.load 會因為 segmentation 的大量 float 吃掉好幾 GB 記憶體，
+    在記憶體較小的電腦上會卡死。改成解析時就丟掉 segmentation，並把精簡版存成 .slim.json，之後直接讀它。
+    """
+    slim = path[:-len(".json")] + ".slim.json"
+    if os.path.exists(slim):
+        with open(slim, encoding="utf-8") as f:
+            return json.load(f)
+    print(f">> 讀取 {os.path.basename(path)}（第一次需要一點時間）")
+    with open(path, encoding="utf-8") as f:
+        inst = json.load(f, object_hook=_drop_segmentation)
+    out = {
+        "images": [{k: im[k] for k in IMAGE_KEYS} for im in inst["images"]],
+        "categories": [{"id": c["id"], "name": c["name"]} for c in inst["categories"]],
+        "annotations": [{k: a.get(k, 0) for k in ANN_KEYS} for a in inst["annotations"]],
+    }
+    del inst
+    with open(slim + ".part", "w", encoding="utf-8") as f:
+        json.dump(out, f, separators=(",", ":"))
+    os.replace(slim + ".part", slim)
+    return out
 
 
 class Coco:
     def __init__(self, data_root: str, split: str):
         self.split = split
         self.image_dir = os.path.join(data_root, "coco", split)
-        with open(os.path.join(data_root, "coco", "annotations", f"instances_{split}.json"), encoding="utf-8") as f:
-            inst = json.load(f)
+        inst = load_instances(os.path.join(data_root, "coco", "annotations", f"instances_{split}.json"))
         self.images = {im["id"]: im for im in inst["images"]}
         # 類別 id 不連續（1–90 中的 80 個），另外建一個 0–79 的欄位編號
         self.categories = sorted(inst["categories"], key=lambda c: c["id"])
@@ -87,6 +122,8 @@ def download_images(coco: Coco, image_ids: list[int], workers: int = 16) -> int:
                 os.remove(tmp)
             return False
 
+    if not todo:
+        return 0
     with ThreadPoolExecutor(workers) as ex:
-        ok = list(ex.map(fetch, todo))
+        ok = list(tqdm(ex.map(fetch, todo), total=len(todo), desc=f"下載 {coco.split}"))
     return len(ok) - sum(ok)
