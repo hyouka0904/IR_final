@@ -37,7 +37,10 @@ def main():
     cfg = load_config(args.config)
     cache = cfg["paths"]["cache_root"]
     faiss.omp_set_num_threads(os.cpu_count() or 1)          # 建索引可以用滿 CPU；量延遲時才限制執行緒
-    for name in args.galleries or list_sets(cache, "gallery"):
+    names = args.galleries or list_sets(cache, "gallery")
+    if not names:
+        sys.exit("!! cache/sets 沒有圖庫，請先執行 02_prepare_data.py 與 03_extract_features.py")
+    for name in names:
         build_time = {}
         for rep in (*VECTOR_MODELS, "phash"):
             path = features.feature_path(cache, name, rep)

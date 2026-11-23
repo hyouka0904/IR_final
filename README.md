@@ -123,7 +123,7 @@ semantic 的 qrels 若展開成 TREC 檔，會有上千萬列（person 類別出
 ## 4. 執行順序
 
 ```bash
-bash scripts/01_download_data.sh            # COCO 標註、Holidays（加 --with-roxford 另外下載 ROxford / RParis）
+python scripts/01_download_data.py          # COCO 標註、Holidays（加 --with-roxford 另外下載 ROxford / RParis）
 python scripts/02_prepare_data.py           # 抽樣、只下載用得到的 COCO 圖片、產生 edit / box query、寫 qrels
 python scripts/03_extract_features.py       # CLIP / SigLIP / DINOv2 / pHash / tag（需要 GPU 比較快）
 python scripts/04_build_indexes.py          # flat / hnsw / ivfpq / cp、pHash、tag inverted index

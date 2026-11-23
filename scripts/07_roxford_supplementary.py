@@ -2,7 +2,7 @@
 
 依官方協定：query 以 gnd 的 bbx 裁切、圖庫只含 imlist、以 revisitop compute_map 計算 Easy / Medium / Hard 的 mAP 與 mP@k。
 圖庫只有五、六千張，直接以精確分數排出完整排序（compute_map 需要每個 query 對整個圖庫的排序）。
-需要先執行 bash scripts/01_download_data.sh --with-roxford。
+需要先執行 python scripts/01_download_data.py --with-roxford。
 
 輸出：cache/features/{dataset}/{rep}_{db|q}.npy、results/roxford/summary.csv、results/roxford/per_query/{dataset}_{rep}.csv
 """
@@ -51,6 +51,11 @@ def main():
     out_dir = os.path.join(cfg["paths"]["results_root"], "roxford")
     os.makedirs(os.path.join(out_dir, "per_query"), exist_ok=True)
     rows = []
+    missing = [ds for ds in rcfg["datasets"]
+               if not os.path.exists(os.path.join(revisited.dataset_dir(ds, data_root), f"gnd_{ds}.pkl"))]
+    if missing or not os.path.exists(os.path.join(cfg["paths"]["revisitop"], "evaluate.py")):
+        sys.exit(f"!! 缺少 ROxford / RParis 資料或 revisitop 程式碼（{', '.join(missing) or 'revisitop'}），"
+                 "請先執行 python scripts/01_download_data.py --with-roxford")
     for ds in rcfg["datasets"]:
         gnd = revisited.load_gnd(ds, data_root)
         db_paths = revisited.db_image_paths(gnd, ds, data_root)

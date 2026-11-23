@@ -1,6 +1,6 @@
 # HANDOFF
 
-> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-18（階段 3：demo、README）
+> 交接文件：每完成一個重要階段就更新。最後更新：2026-11-23（01 改為跨平台 Python 腳本）
 
 ## 任務目標
 
@@ -27,7 +27,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 - [x] 階段 0：建 worktree、替換 `proposal.md`、建立本文件
 - [x] 階段 1：核心模組＋單元測試
   - `configs/default.yaml`：新題目的全部超參數與各 query set 的實驗清單
-  - 資料層：`src/data/sets.py`（manifest、CategoryQrels、SparseQrels）、`coco.py`、`holidays.py`、`edits.py`；`scripts/01_download_data.sh`、`02_prepare_data.py`
+  - 資料層：`src/data/sets.py`（manifest、CategoryQrels、SparseQrels）、`coco.py`、`holidays.py`、`edits.py`；`scripts/01_download_data.py`、`02_prepare_data.py`
   - 表示法：`src/models/encoders.py`（改用各模型官方前處理）、`phash.py`、`tagger.py`、`names.py`；`src/features.py`
   - 文字檢索：`src/text/inverted_index.py`（HW1，含布林 AND/OR 與 forward index）、`bm25.py`（HW2）
   - 索引：`src/index/cluster_pruning.py`（HW2）、`faiss_index.py`（加 cp 與 pHash 二元索引）
@@ -56,6 +56,8 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 - [ ] 期末報告
 
 ## 重要決策
+
+- **01 下載改用 Python**（2026-11-23）：使用者在 Windows PowerShell 執行 `bash scripts/01_download_data.sh` 失敗（`set: pipefail` 無效，CRLF 換行造成），且 Windows 通常沒有 curl/wget/unzip/tar 的 bash 環境。改成 `scripts/01_download_data.py`，只用標準函式庫（urllib、zipfile、tarfile）；ROxford / RParis 也自己下載攤平（revisitop 的 download.py 用 `os.system('wget …')`，Windows 不能用），revisitop 程式碼改下載 GitHub zip，不需要 git。02 / 04 / 05 / 07 缺前置資料時改成印出明確訊息並結束（原本 04 / 05 什麼都不印、07 直接 traceback）。
 
 - **config_id = `{method}-{index}-{post}`**：method ∈ clip / siglip / dinov2 / phash / bm25 / {向量模型}+bm25；index ∈ flat / hnsw / ivfpq / cp（bm25 單獨時為 inv，phash 只有 flat）；post 為 none 或 aqe / rocchio / mmr 以 + 串接。不跑完整網格，每個 query set 跑哪些設定寫在 `eval.experiments`。
 - **指標自己算、與 trec_eval 定義一致**：semantic qrels 展開後會有上千萬列（person 出現在約一半的 COCO 圖），所以只存類別矩陣（`CategoryQrels`）並在 numpy 上計算。`tests/test_metrics.py` 以 pytrec_eval 逐 query 驗證一致；`src/eval/trec.py` 可輸出 run / qrels 給官方 trec_eval 交叉驗證。

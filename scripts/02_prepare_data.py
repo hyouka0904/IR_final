@@ -139,6 +139,9 @@ def prepare_phone(cfg: dict) -> None:
 def main():
     args = parse_args()
     cfg = load_config(args.config)
+    ann = os.path.join(cfg["paths"]["data_root"], "coco", "annotations", f"instances_{cfg['data']['coco']['gallery_split']}.json")
+    if not os.path.exists(ann):
+        sys.exit(f"!! 找不到 {ann}，請先執行 python scripts/01_download_data.py")
     prepare_coco(cfg, download=not args.no_download)
     prepare_holidays(cfg)
     prepare_phone(cfg)

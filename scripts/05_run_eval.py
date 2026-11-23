@@ -145,6 +145,8 @@ def main():
         names = args.queries or [n for n in ("coco_semantic", "coco_similar") if n in prepared]
     else:
         names = args.queries or [n for n in exps if n in prepared]
+    if not names:
+        sys.exit("!! cache/sets 沒有可評估的 query set，請先執行 02_prepare_data.py、03_extract_features.py、04_build_indexes.py")
     for name in names:
         config_ids = args.configs or (exps["speed"] if args.speed else exps[name])
         evaluate_set(cfg, name, config_ids, "summary_speed.csv" if args.speed else "summary.csv", args.write_runs)
