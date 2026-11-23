@@ -10,7 +10,7 @@ import _bootstrap  # noqa: F401
 from PIL import Image
 
 from src.config import load_config, resolve_path
-from src.data import read_manifest
+from src.data import gallery_path, read_manifest
 from src.pipeline import SearchEngine
 from src.schema import INDEX_KINDS, RERANKERS, TASKS, SearchRequest
 
@@ -29,7 +29,7 @@ def main():
     args = ap.parse_args()
 
     root = resolve_path(cfg, "data")
-    files = {r["image_id"]: r["file_name"] for r in read_manifest(root / "gallery.json")}
+    files = {r["image_id"]: gallery_path(cfg, r) for r in read_manifest(root / "gallery.json")}
     engine = SearchEngine.from_cache(cfg)
     with Image.open(args.photo) as img:
         resp = engine.search(SearchRequest(img, args.task, args.k, args.representation,
@@ -42,7 +42,7 @@ def main():
     for r in resp.results:
         tags = f"  [{', '.join(r.shared_tags)}]" if r.shared_tags else ""
         print(f"{r.rank:>3}  {r.image_id:>7}  {r.score:+.4f}  "
-              f"{root / 'train2017' / files[r.image_id]}{tags}")
+              f"{files[r.image_id]}{tags}")
     print("timings (ms): " + ", ".join(f"{k}={v:.1f}" for k, v in resp.timings_ms.items()))
 
 

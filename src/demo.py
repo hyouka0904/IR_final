@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from src.config import ROOT, resolve_path
-from src.data import read_manifest
+from src.data import gallery_path, read_manifest
 from src.pipeline import SearchEngine
 from src.preprocess import preprocess
 from src.schema import SearchRequest
@@ -74,7 +74,7 @@ class DemoState:
         engine = engine or SearchEngine.from_cache(cfg)
         root = resolve_path(cfg, "data")
         manifest = root / "gallery.json"
-        coco_files = ({r["image_id"]: root / "train2017" / r["file_name"]
+        coco_files = ({r["image_id"]: gallery_path(cfg, r)
                        for r in read_manifest(manifest)} if manifest.exists() else {})
         user = UserGallery(_abs(cfg["user"]["dir"]))
         skipped = []

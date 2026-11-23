@@ -4,12 +4,30 @@ paths:
   cache: cache
   results: results
   vocab: data/vocab         # downloaded label lists (Open Images, Places365)
+  holidays: data/holidays   # INRIA Holidays: jpg/ + the downloaded archives
+  revisited: data/datasets  # ROxford5k / RParis6k (supplementary run)
+  revisitop: third_party/revisitop/python   # official revisitop evaluation code
+  phone: data/phone         # the ~100 phone photos for the user study
 
 data:
   gallery_size: 2000        # README target: 40000
   semantic_queries: 200     # README target: 1000
   similar_queries: 200      # README target: 1000
   seed: 27
+
+holidays:                  # README: Holidays photos merged into the gallery (similar task)
+  merge: true              # add them to gallery.json when downloaded
+
+integrity:                 # expected dataset sizes, checked by scripts/check_data.py
+  coco_images: {train2017: 118287, val2017: 5000}
+  coco_categories: 80
+  holidays: {images: 1491, queries: 500}
+  revisited: {roxford5k: [4993, 70], rparis6k: [6322, 70]}   # [gallery, queries]
+
+box_queries:               # intent disambiguation: crop a semantic query to one object
+  min_categories: 2        # only queries with at least this many categories
+  min_area_frac: 0.05      # the object box covers at least this share of the image
+  pad_frac: 0.1            # box padding on each side, as a share of the box size
 
 models:
   device: auto              # embedding device; search always runs on CPU

@@ -10,7 +10,7 @@ import _bootstrap  # noqa: F401
 import numpy as np
 
 from src.config import load_config, resolve_path
-from src.data import read_manifest
+from src.data import gallery_path, read_manifest
 from src.embed import embed_paths
 from src.encoders import get_encoder
 from src.pipeline import DENSE
@@ -24,7 +24,7 @@ def main():
 
     root = resolve_path(cfg, "data")
     gallery = read_manifest(root / "gallery.json")
-    paths = [root / "train2017" / r["file_name"] for r in gallery]
+    paths = [gallery_path(cfg, r) for r in gallery]  # COCO train2017 and merged Holidays
     ids = np.array([r["image_id"] for r in gallery], dtype=np.int64)
     for rep in args.models:
         t0 = time.perf_counter()
