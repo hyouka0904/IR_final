@@ -7,10 +7,12 @@ COCO 圖片不在這裡下載：02_prepare_data.py 抽樣後只下載用得到�
 用法：python scripts/01_download_data.py [--with-roxford]
 """
 import argparse
+import ftplib
 import os
 import shutil
 import sys
 import tarfile
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -23,6 +25,7 @@ from src.config import load_config
 COCO_ANN = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
 HOLIDAYS = [f"ftp://ftp.inrialpes.fr/pub/lear/douze/data/{p}.tar.gz" for p in ("jpg1", "jpg2")]
 HOLIDAYS_N = 1491
+TIMEOUT = 60          # 秒；連線或超過這麼久沒收到資料就放棄（避免被防火牆擋住時無限等待）
 REVISITOP_ZIP = "https://github.com/filipradenovic/revisitop/archive/refs/heads/master.zip"
 REVISITED = {  # 與 revisitop download.py 相同的來源
     "roxford5k": ("https://www.robots.ox.ac.uk/~vgg/data/oxbuildings", ["oxbuild_images-v1.tgz"]),
@@ -37,18 +40,51 @@ def fetch(url: str, dst: Path) -> Path:
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
     part = dst.with_name(dst.name + ".part")
-    print(f">> 下載 {url}")
-    with urllib.request.urlopen(url, timeout=60) as r, open(part, "wb") as f:
-        total, done, last = int(r.headers.get("Content-Length") or 0), 0, -1
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
-            done += len(chunk)
-            pct = done * 100 // total if total else -1
-            if pct != last and pct % 5 == 0:
-                print(f"   {done / 2**20:,.0f} MB" + (f" / {total / 2**20:,.0f} MB ({pct}%)" if total else ""), flush=True)
-                last = pct
+    print(f">> 下載 {url}", flush=True)
+    progress = Progress()
+    with open(part, "wb") as f:
+        if url.startswith("ftp://"):
+            _fetch_ftp(url, f, progress)
+        else:
+            with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
+                progress.total = int(r.headers.get("Content-Length") or 0)
+                while chunk := r.read(1 << 20):
+                    f.write(chunk)
+                    progress.add(len(chunk))
     os.replace(part, dst)
     return dst
+
+
+class Progress:
+    """每 5% 印一行；不知道總大小時每 50 MB 印一行。"""
+
+    def __init__(self):
+        self.total, self.done, self.last = 0, 0, -1
+
+    def add(self, n: int) -> None:
+        self.done += n
+        step = self.done * 100 // self.total // 5 if self.total else self.done // (50 << 20)
+        if step != self.last:
+            self.last = step
+            mb = f"   {self.done / 2**20:,.0f} MB"
+            print(mb + (f" / {self.total / 2**20:,.0f} MB ({self.done * 100 // self.total}%)" if self.total else ""), flush=True)
+
+
+def _fetch_ftp(url: str, f, progress: Progress) -> None:
+    """urllib 的 FTP 在資料連線被防火牆擋住時可能無限等待；ftplib 的 timeout 對控制與資料連線都有效。"""
+    u = urllib.parse.urlparse(url)
+    with ftplib.FTP(timeout=TIMEOUT) as ftp:
+        ftp.connect(u.hostname, u.port or 21)
+        ftp.login()
+        ftp.voidcmd("TYPE I")
+        progress.total = ftp.size(u.path) or 0
+        print("   已連上 FTP，開始傳輸", flush=True)
+
+        def write(chunk: bytes) -> None:
+            f.write(chunk)
+            progress.add(len(chunk))
+
+        ftp.retrbinary(f"RETR {u.path}", write, blocksize=1 << 16)
 
 
 def count_jpg(d: Path) -> int:
@@ -82,9 +118,12 @@ def holidays(data: Path) -> None:
         for url in HOLIDAYS:
             try:
                 archive = fetch(url, d / url.rsplit("/", 1)[1])
-            except OSError as e:
-                sys.exit(f"!! Holidays 下載失敗（{e}）。請到 https://lear.inrialpes.fr/~jegou/data.php "
-                         f"手動下載 jpg1.tar.gz、jpg2.tar.gz 放到 {d} 後重跑")
+            except (OSError, EOFError, ftplib.Error) as e:
+                # Holidays 只是 similar search 的補充評估，下載不到不擋住後面的步驟（02 會自動略過 Holidays）
+                print(f"!! Holidays 下載失敗（{type(e).__name__}: {e}），先略過。\n"
+                      f"   多半是網路擋了 FTP。可以換個網路重跑，或用其他電腦下載 {', '.join(HOLIDAYS)}，\n"
+                      f"   放到 {d} 後重跑本腳本（會跳過下載直接解壓）。", file=sys.stderr)
+                return
             extract_flat(archive, d / "jpg")
     print(f">> Holidays: {count_jpg(d / 'jpg')} 張")
 
@@ -123,11 +162,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default=None)
     p.add_argument("--with-roxford", action="store_true", help="另外下載 supplementary 用的 ROxford / RParis")
+    p.add_argument("--skip-holidays", action="store_true", help="不下載 Holidays（FTP 被擋時）")
     args = p.parse_args()
     cfg = load_config(args.config)
     data = ROOT / cfg["paths"]["data_root"]
     coco(data)
-    holidays(data)
+    if not args.skip_holidays:
+        holidays(data)
     if args.with_roxford:
         revisitop_code(ROOT / cfg["paths"]["revisitop"])
         revisited(data)

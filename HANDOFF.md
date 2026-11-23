@@ -57,6 +57,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 
 ## 重要決策
 
+- **Holidays FTP 卡住**（2026-11-23）：使用者在 Windows 與 Linux 伺服器上，01 都卡在 Holidays 的 FTP 下載（等了 30 分鐘）。urllib 的 FTP 在資料連線被擋時會無限等待，改用 ftplib（控制、資料連線都有 60 秒 timeout）。Holidays 下載失敗時只印提示並繼續（不再 sys.exit），新增 `--skip-holidays`。以本機假 FTP server 測過：卡住的情境 3 秒（測試用 timeout）後放棄，正常傳輸的檔案內容一致。
 - **程式碼流向**（2026-11-23）：sandbox 跑在使用者的 Linux 伺服器上。伺服器 host repo `git fetch sandbox-ir-final feat/zero-shot-search` → 在伺服器建置、開 demo（區網 / VPN）→ 伺服器 push 到 GitHub → Windows 從 GitHub pull。
 - **02 在 Windows 卡死**（2026-11-23）：`json.load` 整份 instances_train2017.json（約 450 MB）會因 segmentation polygon 吃掉數 GB 記憶體。`coco.load_instances` 改用 object_hook 在解析時丟掉 segmentation，只留需要的欄位，並存成 `instances_{split}.slim.json`，之後直接讀它。合成資料測試（243 MB、15 萬標註）峰值 1266 MB → 486 MB，重讀 0.5 秒。COCO 圖片下載加上 tqdm 進度條（原本 4 萬張下載期間沒有任何輸出，看起來像當掉）。README 的指令一律改用 `/`（使用者在 Linux 照抄 Windows 範例的 `scripts\01…` 失敗）。
 - **伺服器部署**（2026-11-23）：使用者改在 Linux 伺服器（GTX 1660 Ti 6 GB，driver CUDA 13.2）上建置，並透過區網 / VPN 開 demo。app 新增 `--auth 帳號:密碼`（或環境變數 `ZSIS_AUTH`），README 新增 4.4（`--host 0.0.0.0`、ufw、tmux）。CUDA 對照表註明 13.x 用 cu128。
