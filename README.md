@@ -194,6 +194,7 @@ semantic 的 qrels 若展開成 TREC 檔，會有上千萬列（person 類別出
 ```bash
 python scripts/01_download_data.py          # COCO 標註、Holidays（加 --with-roxford 另外下載 ROxford / RParis）
 python scripts/02_prepare_data.py           # 抽樣、只下載用得到的 COCO 圖片、產生 edit / box query、寫 qrels
+python scripts/check_data.py                # 資料完整性檢查（01、02 之後都可以跑；--full 每張圖完整解碼）
 python scripts/03_extract_features.py       # CLIP / SigLIP / DINOv2 / pHash / tag（需要 GPU 比較快）
 python scripts/04_build_indexes.py          # flat / hnsw / ivfpq / cp、pHash、tag inverted index
 python scripts/05_run_eval.py               # 每個 query set 跑 eval.experiments
@@ -202,6 +203,15 @@ python scripts/07_roxford_supplementary.py  # supplementary（需要 --with-roxf
 
 python app/app.py                           # demo：開 http://127.0.0.1:7860（--host 0.0.0.0 開放區網、--share 產生公開網址）
 ```
+
+`check_data.py` 檢查的項目：
+
+- 有沒有未完成的下載（`.part`）
+- COCO 標註的圖片數與類別數
+- Holidays、ROxford / RParis 的圖片數與 query 數，以及每張圖是否可讀取。只檢查 gnd 用到的圖，RParis 原始封存檔中本來就有 20 張損毀的圖
+- `cache/sets` 每個 set 的大小與 config 一致，id 不重複，圖片可讀取，box、source_idx、exclude_idx 合法，qrels 的大小與 id 和圖庫對得上，每個 query 至少有一張相關圖
+
+還沒下載的選用資料集（Holidays、ROxford）會標成略過，不算失敗。有任何失敗時結束碼為 1。`pytest tests/test_data_integrity.py` 會用合成資料測試這些檢查本身，資料存在時也會檢查真實資料。
 
 輸出在 `results/{query_set}/`：
 

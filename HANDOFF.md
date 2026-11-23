@@ -57,6 +57,7 @@ README、proposal、source code。舊題目（ROxford 地標檢索的失敗模�
 
 ## 重要決策
 
+- **資料完整性檢查**（2026-11-23）：`src/data/integrity.py` + `scripts/check_data.py` + `tests/test_data_integrity.py`。圖片預設做快速檢查（PIL 讀檔頭；JPEG 檢查結尾 EOI 標記，缺少時再完整解碼，避免把結尾有額外資料的正常 JPEG 誤判），`--full` 每張完整解碼。ROxford / RParis 只檢查 gnd 的 imlist + qimlist（RParis 封存檔內有 20 張損毀圖不在 imlist）。選用資料集未下載時為 skip。pytest 的真實資料測試在資料不存在時自動 skip。驗證：單元測試 59 passed、5 skipped（真實資料不存在）；以煙霧測試資料跑 02 → check_data，sets 全數通過，截斷一張圖庫圖片後正確抓到並回傳結束碼 1。
 - **下載完整性檢查**（2026-11-23）：知道總大小時，下載完會比對檔案大小，不符就不改名（保留 .part，重跑接續）；HTTP 416（.part 不小於檔案）時丟掉 .part 從頭下載；tar 解壓失敗時刪除封存檔並請使用者重跑。以本機假 HTTP server 測過 Range 接續、416、連線提早結束後接續、損毀封存檔。
 - **Holidays 其實有在下載**（2026-11-23 更正）：使用者的 `data/holidays` 已有 991 MB，所以 FTP 沒被擋，只是舊版進度顯示在不知道總大小時（urllib FTP 沒有 Content-Length）一行都不印，看起來像卡住。新版用 FTP SIZE 取得總大小並正常顯示進度。另外加上**接續下載**：重跑時從 `.part` 的大小接續（FTP 用 REST、HTTP 用 Range，伺服器不支援 Range 就從頭），以本機假 FTP / HTTP server 測過接續、`.part` 已完整、從頭三種情況。
 - **Holidays FTP 卡住**（2026-11-23）：使用者在 Windows 與 Linux 伺服器上，01 都卡在 Holidays 的 FTP 下載（等了 30 分鐘）。urllib 的 FTP 在資料連線被擋時會無限等待，改用 ftplib（控制、資料連線都有 60 秒 timeout）。Holidays 下載失敗時只印提示並繼續（不再 sys.exit），新增 `--skip-holidays`。以本機假 FTP server 測過：卡住的情境 3 秒（測試用 timeout）後放棄，正常傳輸的檔案內容一致。
