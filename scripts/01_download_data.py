@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import tarfile
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -50,6 +51,9 @@ def fetch(url: str, dst: Path) -> Path:
         _fetch_ftp(url, part, progress)
     else:
         _fetch_http(url, part, progress)
+    # 連線提早結束但沒有報錯時，檔案會少一截；不改名，重跑時從 .part 接續
+    if progress.total and part.stat().st_size != progress.total:
+        raise OSError(f"{dst.name} 下載不完整（{part.stat().st_size:,} / {progress.total:,} bytes），請重跑以接續下載")
     os.replace(part, dst)
     return dst
 
@@ -73,7 +77,16 @@ def _fetch_http(url: str, part: Path, progress: Progress) -> None:
     req = urllib.request.Request(url)
     if progress.done:
         req.add_header("Range", f"bytes={progress.done}-")
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    try:
+        r = urllib.request.urlopen(req, timeout=TIMEOUT)
+    except urllib.error.HTTPError as e:
+        if e.code != 416 or not progress.done:
+            raise
+        # 416：.part 已經不小於檔案大小（內容不明），丟掉從頭下載
+        part.unlink()
+        progress.done = 0
+        r = urllib.request.urlopen(url, timeout=TIMEOUT)
+    with r:
         if progress.done and r.status != 206:      # 伺服器不支援接續，從頭下載
             progress.done = 0
         progress.total = progress.done + int(r.headers.get("Content-Length") or 0) if r.headers.get("Content-Length") else 0
@@ -107,13 +120,20 @@ def count_jpg(d: Path) -> int:
 
 
 def extract_flat(archive: Path, dst: Path) -> None:
-    """解壓 tar 並把所有 .jpg 攤平到 dst（revisitop 的封存檔內有子資料夾）。"""
+    """解壓 tar 並把所有 .jpg 攤平到 dst（revisitop 的封存檔內有子資料夾）。
+
+    封存檔損毀時（例如接續下載時伺服器上的檔案已經換過）刪掉它並結束，重跑就會重新下載。
+    """
     dst.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive) as tar:
-        for m in tar:
-            if m.isfile() and m.name.lower().endswith(".jpg"):
-                with tar.extractfile(m) as src, open(dst / Path(m.name).name, "wb") as out:
-                    shutil.copyfileobj(src, out)
+    try:
+        with tarfile.open(archive) as tar:
+            for m in tar:
+                if m.isfile() and m.name.lower().endswith(".jpg"):
+                    with tar.extractfile(m) as src, open(dst / Path(m.name).name, "wb") as out:
+                        shutil.copyfileobj(src, out)
+    except (tarfile.TarError, EOFError, OSError) as e:
+        archive.unlink(missing_ok=True)
+        sys.exit(f"!! {archive.name} 解壓失敗（{type(e).__name__}: {e}），檔案可能損毀，已刪除。請重跑，會重新下載。")
 
 
 def coco(data: Path) -> None:
