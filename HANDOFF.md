@@ -66,6 +66,14 @@
   - README / README.zh-TW：狀態、實驗與執行方式、目錄結構、快速開始（PyTorch 對照表、conda-forge、01–08、01 的檢查修復、Holidays FTP、手機照片標註流程）、Windows、Linux 伺服器（--host / --auth / tmux / ufw）、測試與 CI、壓縮檔、demo、時程
   - proposal.md 補上 PDF 的 Demo 一行
 
+## 2026-11-24 伺服器實跑 log 修正（branch `claude/awesome-clarke-uchjdc`，基於 func_merge）
+
+- SigLIP：`02_embed.py --models siglip` 因 `open_clip.get_tokenizer` 需要 `transformers` 而失敗。tokenizer 改成第一次 `encode_text` 才建（只有 CLIP 做 tag 會用到），SigLIP 抽圖片特徵不需要 transformers。
+- IVF-PQ：3,491 張時 nbits=8（256 個 PQ centroid）訓練資料不足，FAISS 對每個 sub-quantizer 印警告（32 行）。nbits 改成不超過 log2(N/39)（3,491 張 → 6）。
+- check_data：ROxford / RParis（選用）中斷的 `.part` 改為 skip，不算 fail。
+- 01_download：小於 1 MB 的檔案顯示 KB（原本 gnd pkl 顯示 `0 MB / 0 MB`）；ROxford 圖片還沒解壓時顯示「not extracted yet; downloading the archives」，不再是「missing or broken; extracting again」。
+- 待觀察：clip@ivfpq recall_loss@10=0.30、clip@cluster 0.21（3,491 張）；tags 的 top df 有 saucer / islet 等（Holidays 風景照 + 每張固定 15 個 tag），報告可討論。
+
 ## 重要決策
 
 - **data/ 結構與舊 branch 相容**：`data/coco/annotations`、`data/coco/{train2017,val2017}`、`data/holidays/jpg`、`data/datasets/<ds>` 都和舊 branch 一樣，伺服器上已下載的資料可以直接用；舊位置的 `data/coco/annotations_trainval2017.zip` 會自動搬到 zip 版本的位置 `data/annotations_trainval2017.zip`。

@@ -71,11 +71,21 @@ class ClipEncoder(_TorchEncoder):
         model, _, transform = open_clip.create_model_and_transforms(arch, pretrained=pretrained)
         super().__init__(model, transform, device)
         self.name = name
-        self.tokenizer = open_clip.get_tokenizer(arch)
+        self.arch = arch
+        self._tokenizer = None  # built on first encode_text (SigLIP's needs `transformers`)
         self.batch_size = batch_size
 
     def _features(self, batch):
         return self.model.encode_image(batch)
+
+    @property
+    def tokenizer(self):
+        """SigLIP's tokenizer is a HuggingFace one (needs `transformers` and a download); the
+        pipeline only encodes text with CLIP (tags), so SigLIP image embedding never builds it."""
+        if self._tokenizer is None:
+            import open_clip
+            self._tokenizer = open_clip.get_tokenizer(self.arch)
+        return self._tokenizer
 
     def encode_text(self, texts: list[str]) -> np.ndarray:
         """L2-normalized CLIP text embeddings, float32, in batches of batch_size."""

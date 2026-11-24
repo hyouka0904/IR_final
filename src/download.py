@@ -37,9 +37,8 @@ class Progress:
         step = self.done * 100 // self.total // 5 if self.total else self.done // (50 << 20)
         if step != self.last:
             self.last = step
-            mb = f"   {self.done / 2**20:,.0f} MB"
-            print(mb + (f" / {self.total / 2**20:,.0f} MB ({self.done * 100 // self.total}%)"
-                        if self.total else ""), flush=True)
+            print(f"   {_mb(self.done)}" + (f" / {_mb(self.total)} ({self.done * 100 // self.total}%)"
+                                         if self.total else ""), flush=True)
 
 
 def _fetch_http(url: str, part: Path, progress: Progress) -> None:
@@ -128,7 +127,8 @@ def remote_size(url: str) -> int | None:
 
 
 def _mb(n: int) -> str:
-    return f"{n / 2**20:,.0f} MB"
+    """Bytes as MB; files under 1 MB (the ROxford gnd pickles) as KB instead of "0 MB"."""
+    return f"{n / 2**20:,.0f} MB" if n >= 2**20 else f"{n / 2**10:,.0f} KB"
 
 
 def ensure_archive(url: str, dst: Path, check_only: bool = False) -> Path | None:

@@ -217,8 +217,12 @@ def revisited(cfg, check_only: bool) -> bool:
         if need == 0:
             print(f"   complete ({len(paths)} images)")
             continue
-        print(f"   {need} / {len(paths)} images missing or broken"
-              + ("" if check_only else "; extracting again"))
+        if len(missing) == len(paths):
+            print(f"   images not extracted yet ({len(paths)})"
+                  + ("" if check_only else "; downloading the archives"))
+        else:
+            print(f"   {need} / {len(paths)} images missing or broken"
+                  + ("" if check_only else "; extracting again"))
         all_ok = False
         for url in urls:
             archive = ensure_archive(url, d / url.rsplit("/", 1)[1], check_only)

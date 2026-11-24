@@ -144,8 +144,9 @@ class FaissANNIndex:
             # nlist null = round(sqrt(N)), the same order as cluster pruning's leaders
             nlist = int(params.get("nlist") or max(1, round(math.sqrt(n))))
             nlist = min(nlist, n)
-            # 2^nbits PQ centroids need at least that many training vectors
-            nbits = min(int(params["nbits"]), max(1, int(math.log2(n))))
+            # FAISS wants >= 39 training vectors per PQ centroid (2^nbits of them per
+            # sub-quantizer); fewer prints a warning per sub-quantizer and trains poorly
+            nbits = min(int(params["nbits"]), max(1, int(math.log2(max(n / 39, 2)))))
             index = faiss.IndexIVFPQ(faiss.IndexFlatIP(d), d, nlist, m, nbits,
                                      faiss.METRIC_INNER_PRODUCT)
             index.train(x)

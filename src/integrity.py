@@ -52,10 +52,17 @@ def check_partials(cfg: dict) -> Section:
     roots = {resolve_path(cfg, k) for k in ("data", "holidays", "revisited")}
     roots.add(resolve_path(cfg, "data").parent)  # the annotations zip lives next to data/coco
     parts = sorted({p for r in roots if r.is_dir() for p in r.rglob("*.part")})
-    if parts:
-        sec.add("fail", f"{len(parts)} interrupted download(s), e.g. {parts[0].name}: "
+    # ROxford / RParis are optional: an interrupted archive there does not fail the check
+    optional = resolve_path(cfg, "revisited")
+    required = [p for p in parts if not p.is_relative_to(optional)]
+    if required:
+        sec.add("fail", f"{len(required)} interrupted download(s), e.g. {required[0].name}: "
                         "run 01_download.py to resume")
-    else:
+    if len(parts) > len(required):
+        p = next(p for p in parts if p.is_relative_to(optional))
+        sec.add("skip", f"interrupted optional download {p.name} (ROxford / RParis): "
+                        "run 01_download.py --with-roxford to resume")
+    if not parts:
         sec.add("ok", "no interrupted downloads (.part)")
     return sec
 
