@@ -1,6 +1,6 @@
 # HANDOFF
 
-最後更新：2026-11-24（修 Windows CI 失敗的測試）
+最後更新：2026-11-24（Windows CI 第二次失敗待查；交接）
 
 ## 任務目標
 
@@ -97,6 +97,11 @@ PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "n
 程式部分完成。需要使用者 / 真實環境做的：
 
 - 伺服器：從 sandbox fetch `feat/ir-image-search`，在 Linux 伺服器建環境，跑 01（會沿用並修復舊 branch 下載的資料）→ 02 → 03 → 04 → 05，確認真實模型（open_clip SigLIP、timm DINOv2）與 08（revisitop）可以跑
-- CI：func_merge 第一次跑（run 45165055363）ubuntu 通過；windows 只有 test_demo::test_evaluation_query_results_are_marked 失敗（測試用 "/" 切路徑，Windows 是 "\\"），已改用 Path.stem。重推後確認兩邊都綠
+- CI：
+  - 第一次（run 45165055363，ab95e1a）：ubuntu 通過；windows 只有 test_demo::test_evaluation_query_results_are_marked 失敗（測試用 "/" 切路徑，Windows 是 "\\"），68894f7 改用 Path.stem
+  - 第二次（run 45396359419）：仍是 failure，**原因未查**；也還沒確認它跑的是不是 68894f7。下一步先抓 log：
+    `gh run view 45396359419 --json headSha,jobs`，再用 `gh api repos/hyouka0904/IR_final/actions/jobs/<job id>/logs` 看失敗的 job
+  - sandbox 讀不到 GitHub API（401）；使用者在伺服器跑 `sbx secret set github --sandbox ir-final -t "$(gh auth token)"` 後，sandbox 才能自己讀 CI log、push
+  - Windows 的測試只能在 GitHub windows runner 或 Windows 電腦上跑（`python -m pytest -q -m "not models"`）；Linux 部分在 sandbox 跑（PYTHONPATH 指到 scratchpad 的 pylib / pylib_gr）
 - 拍手機照片、兩人標註、kappa
 - 決定是否放大到 40k / 1,000 / 1,000（`data.*`），並調整 IVF-PQ / HNSW 參數
