@@ -1,4 +1,5 @@
 import csv
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -214,7 +215,7 @@ def test_evaluation_query_results_are_marked(cfg, state, tmp_path):
     (data / "queries_semantic.json").write_text(json.dumps(
         [{"image_id": 77, "file_name": "q.png", "categories": [1]}]))
     items, _, timings, _ = run_search(state, solid(COLORS[1]), "semantic", "clip", 4, query_qid=77)
-    marks = {path.rsplit("/", 1)[-1].split(".")[0]: cap[0] for path, cap in items}
+    marks = {Path(path).stem: cap[0] for path, cap in items}  # Windows paths use backslashes
     assert marks["1"] == "✓" and marks["2"] == "✗" and "evaluation query 77" in timings
 
 

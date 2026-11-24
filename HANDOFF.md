@@ -1,6 +1,6 @@
 # HANDOFF
 
-最後更新：2026-11-23（階段 5：建置說明、CI、冒煙測試）
+最後更新：2026-11-24（修 Windows CI 失敗的測試）
 
 ## 任務目標
 
@@ -97,6 +97,6 @@ PYTHONPATH=$SP/pylib:$SP/pylib_gr python3 -m pytest -q -p no:cacheprovider -m "n
 程式部分完成。需要使用者 / 真實環境做的：
 
 - 伺服器：從 sandbox fetch `feat/ir-image-search`，在 Linux 伺服器建環境，跑 01（會沿用並修復舊 branch 下載的資料）→ 02 → 03 → 04 → 05，確認真實模型（open_clip SigLIP、timm DINOv2）與 08（revisitop）可以跑
-- 推到 GitHub 後看 CI（Windows 那邊最可能出問題）
+- CI：func_merge 第一次跑（run 45165055363）ubuntu 通過；windows 只有 test_demo::test_evaluation_query_results_are_marked 失敗（測試用 "/" 切路徑，Windows 是 "\\"），已改用 Path.stem。重推後確認兩邊都綠
 - 拍手機照片、兩人標註、kappa
 - 決定是否放大到 40k / 1,000 / 1,000（`data.*`），並調整 IVF-PQ / HNSW 參數
