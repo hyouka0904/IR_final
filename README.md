@@ -11,6 +11,27 @@ No model is trained or fine-tuned. Every component is pre-trained, so any photo 
 
 > **Status:** all components are implemented (November 2026): CLIP, SigLIP, DINOv2 and pHash; FAISS Flat, HW2 cluster pruning, IVF-PQ and HNSW; CLIP zero-shot tags in an HW1-format inverted index with HW2 BM25 and RRF fusion; alpha-QE, Rocchio and MMR; synthetic edits, INRIA Holidays, box queries, phone-photo judging with Cohen's kappa and the ROxford/RParis run; the Gradio demo, the photo-pair check, a data integrity check and CI on Windows and Linux. The 40k-image runs and the phone-photo judging are still to be done (see *Roadmap*).
 
+## Contents
+
+- [Getting started](#getting-started)
+  - [1. Environment](#1-environment)
+  - [2. Run the steps](#2-run-the-steps)
+  - [Windows](#windows)
+  - [On a Linux server, reachable from the LAN or a VPN](#on-a-linux-server-reachable-from-the-lan-or-a-vpn)
+  - [Tests and CI](#tests-and-ci)
+  - [Running from the zip](#running-from-the-zip)
+- [Why two tasks](#why-two-tasks)
+- [How it works](#how-it-works)
+- [Datasets](#datasets)
+- [Evaluation](#evaluation)
+- [Project layout](#project-layout)
+  - [Engineering conventions](#engineering-conventions)
+- [Demo](#demo)
+- [Roadmap](#roadmap)
+- [Team](#team)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
+
 ## Getting started
 
 The default config runs on a small slice: 2,000 gallery images, 200 semantic queries, 200 similar queries, plus the 1,491 INRIA Holidays images. Raise `data.*` in `configs/default.yaml` toward 40,000 / 1,000 / 1,000 to scale up. A GPU is needed only for embedding (02, 03, 08); search, evaluation and the demo run on CPU.
