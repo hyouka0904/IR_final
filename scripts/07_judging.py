@@ -49,8 +49,14 @@ def phone_photos(cfg) -> list[Path]:
     return photos
 
 
-def _rel(path: Path, start: Path) -> str:
-    return Path(os.path.relpath(path, start)).as_posix()
+def _rel(path: Path, start: Path, url: bool = False) -> str:
+    """path relative to start with "/" separators. On Windows a path on another drive (data on D:,
+    repo on C:) has no relative form: then the absolute path, or a file:// URL for the HTML."""
+    try:
+        return Path(os.path.relpath(path, start)).as_posix()
+    except ValueError:
+        path = Path(path).resolve()
+        return path.as_uri() if url else path.as_posix()
 
 
 def pool(cfg, force: bool) -> None:
@@ -104,11 +110,11 @@ def write_sheet(path: Path, photos: list[Path], rows: list[dict]) -> None:
              "text-align:center;font-size:12px}</style><table>"]
     for photo in photos:
         figs = "".join(
-            f"<figure><img src='{html.escape(_rel(ROOT / r['doc_path'], path.parent))}' loading=lazy>"
+            f"<figure><img src='{html.escape(_rel(ROOT / r['doc_path'], path.parent, url=True))}' loading=lazy>"
             f"<figcaption>{r['doc_id']}</figcaption></figure>"
             for r in rows if r["query_id"] == photo.stem)
         parts.append(f"<tr><td><b>{html.escape(photo.stem)}</b><br>"
-                     f"<img src='{html.escape(_rel(photo, path.parent))}'></td><td>{figs}</td></tr>")
+                     f"<img src='{html.escape(_rel(photo, path.parent, url=True))}'></td><td>{figs}</td></tr>")
     parts.append("</table>")
     path.write_text("\n".join(parts), encoding="utf-8")
 

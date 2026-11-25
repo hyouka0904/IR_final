@@ -34,3 +34,24 @@ def test_full_ranking_ip_and_hamming():
 
 def test_query_box_rounds_outward():
     assert query_box({"gnd": [{"bbx": [1.5, 2.2, 10.1, 20.9]}]}, 0) == (1, 2, 11, 21)
+
+
+def test_judging_rel_falls_back_across_drives(tmp_path, monkeypatch):
+    """Windows: data on another drive than the repo has no relative path (os.path.relpath
+    raises ValueError); the CSV gets the absolute path and the HTML a file:// URL."""
+    import importlib.util
+    import os
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    monkeypatch.syspath_prepend(str(root / "scripts"))
+    spec = importlib.util.spec_from_file_location("judging", root / "scripts" / "07_judging.py")
+    judging = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(judging)
+    photo = tmp_path / "a b.jpg"
+    assert judging._rel(photo, tmp_path) == "a b.jpg"
+
+    def other_drive(path, start=None):
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+    monkeypatch.setattr(os.path, "relpath", other_drive)
+    assert judging._rel(photo, root) == photo.resolve().as_posix()
+    assert judging._rel(photo, root, url=True) == photo.resolve().as_uri()
