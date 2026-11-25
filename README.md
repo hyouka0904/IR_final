@@ -34,7 +34,7 @@ No model is trained or fine-tuned. Every component is pre-trained, so any photo 
 
 ## Getting started
 
-The default config runs on a small slice: 2,000 gallery images, 200 semantic queries, 200 similar queries, plus the 1,491 INRIA Holidays images. Raise `data.*` in `configs/default.yaml` toward 40,000 / 1,000 / 1,000 to scale up. A GPU is needed only for embedding (02, 03, 08); search, evaluation and the demo run on CPU.
+The default config runs the full scale: 40,000 gallery images, 1,000 semantic queries, 1,000 similar queries, plus the 1,491 INRIA Holidays images. For a quick test run, set `data.*` in `configs/default.yaml` to 2,000 / 200 / 200. A GPU is needed only for embedding (02, 03, 08); search, evaluation and the demo run on CPU.
 
 ### 1. Environment
 
