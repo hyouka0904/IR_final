@@ -199,43 +199,50 @@ def revisited(cfg, check_only: bool) -> bool:
     all_ok = True
     for ds, urls in cfg["sources"]["revisited"].items():
         print(f">> {ds}")
-        d = resolve_path(cfg, "revisited") / ds
-        gnd_url, gnd_path = cfg["sources"]["revisited_gnd"].format(ds), d / f"gnd_{ds}.pkl"
-        gnd = _load_gnd(gnd_path) if ensure_archive(gnd_url, gnd_path, check_only) else None
-        if gnd is None and gnd_path.exists():
-            print(f"   {gnd_path.name} is unreadable" + ("" if check_only else "; downloading again"))
-            if not check_only:
-                gnd_path.unlink()
-                gnd = _load_gnd(fetch(gnd_url, gnd_path))
-        if gnd is None:
-            all_ok = False
-            continue
-        paths = [d / "jpg" / f"{n}.jpg" for n in gnd["imlist"] + gnd["qimlist"]]
-        missing, broken = split_problems(paths)
-        report_broken(broken, check_only)
-        need = len(missing) + len(broken)
-        if need == 0:
-            print(f"   complete ({len(paths)} images)")
-            continue
-        if len(missing) == len(paths):
-            print(f"   images not extracted yet ({len(paths)})"
-                  + ("" if check_only else "; downloading the archives"))
-        else:
-            print(f"   {need} / {len(paths)} images missing or broken"
-                  + ("" if check_only else "; extracting again"))
-        all_ok = False
-        for url in urls:
-            archive = ensure_archive(url, d / url.rsplit("/", 1)[1], check_only)
-            if archive is not None and not check_only:
-                extract_with_retry(url, archive, d / "jpg")
-                archive.unlink()  # the images are out; the archives are large
-        if not check_only:
+        try:
+            d = resolve_path(cfg, "revisited") / ds
+            gnd_url, gnd_path = cfg["sources"]["revisited_gnd"].format(ds), d / f"gnd_{ds}.pkl"
+            gnd = _load_gnd(gnd_path) if ensure_archive(gnd_url, gnd_path, check_only) else None
+            if gnd is None and gnd_path.exists():
+                print(f"   {gnd_path.name} is unreadable"
+                      + ("" if check_only else "; downloading again"))
+                if not check_only:
+                    gnd_path.unlink()
+                    gnd = _load_gnd(fetch(gnd_url, gnd_path))
+            if gnd is None:
+                all_ok = False
+                continue
+            paths = [d / "jpg" / f"{n}.jpg" for n in gnd["imlist"] + gnd["qimlist"]]
             missing, broken = split_problems(paths)
-            if missing or broken:
-                sys.exit(f"!! {ds}: {len(missing) + len(broken)} images still missing or broken "
-                         "after extraction; if the source moved, see the revisitop issues")
-            print(f"   complete ({len(paths)} images)")
-            all_ok = True
+            report_broken(broken, check_only)
+            need = len(missing) + len(broken)
+            if need == 0:
+                print(f"   complete ({len(paths)} images)")
+                continue
+            if len(missing) == len(paths):
+                print(f"   images not extracted yet ({len(paths)})"
+                      + ("" if check_only else "; downloading the archives"))
+            else:
+                print(f"   {need} / {len(paths)} images missing or broken"
+                      + ("" if check_only else "; extracting again"))
+            for url in urls:
+                archive = ensure_archive(url, d / url.rsplit("/", 1)[1], check_only)
+                if archive is not None and not check_only:
+                    extract_with_retry(url, archive, d / "jpg")
+                    archive.unlink()  # the images are out; the archives are large
+            if check_only:
+                all_ok = False
+            else:
+                missing, broken = split_problems(paths)
+                if missing or broken:
+                    sys.exit(f"!! {ds}: {len(missing) + len(broken)} images still missing or broken "
+                             "after extraction; if the source moved, see the revisitop issues")
+                print(f"   complete ({len(paths)} images)")
+        except OSError as e:  # the connection kept dropping (src/download.py retries first)
+            print(f"!! {ds}: download stopped ({e})\n"
+                  f"   the partial download is kept; run 01_download.py --with-roxford again "
+                  f"to resume", file=sys.stderr)
+            all_ok = False
     return all_ok
 
 
@@ -281,6 +288,8 @@ def main():
     print("\n" + ", ".join(f"{k} {'✓' if v else '✗'}" for k, v in status.items()))
     if args.check_only and not all(status.values()):
         print("run without --check-only to resume or repair")
+    elif args.with_roxford and not status["ROxford / RParis"]:
+        sys.exit(1)  # so `01_download.py --with-roxford && 08_roxford.py` stops here
 
 
 if __name__ == "__main__":

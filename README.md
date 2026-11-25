@@ -204,7 +204,7 @@ python scripts/05_evaluate.py --experiments   # ablations, re-ranking, index com
 python scripts/06_pairs.py               # photo-pair check -> results/pairs.csv
 python scripts/07_judging.py pool        # phone photos: pool -> judge -> kappa -> qrels (below)
 python scripts/01_download.py --with-roxford && python scripts/08_roxford.py   # supplementary
-python scripts/search.py my_photo.jpg --task semantic --index hnsw --rerank aqe mmr
+python scripts/search.py data/holidays/jpg/100000.jpg --task similar --index hnsw --rerank aqe mmr
 python app/app.py                        # web demo on http://127.0.0.1:7860
 ```
 

@@ -204,7 +204,7 @@ python scripts/05_evaluate.py --experiments   # 消融、重排、索引比較
 python scripts/06_pairs.py               # 照片配對檢查 -> results/pairs.csv
 python scripts/07_judging.py pool        # 手機照片：pool -> 標註 -> kappa -> qrels（見下方）
 python scripts/01_download.py --with-roxford && python scripts/08_roxford.py   # 補充實驗
-python scripts/search.py my_photo.jpg --task semantic --index hnsw --rerank aqe mmr
+python scripts/search.py data/holidays/jpg/100000.jpg --task similar --index hnsw --rerank aqe mmr
 python app/app.py                        # 網頁 demo，開 http://127.0.0.1:7860
 ```
 

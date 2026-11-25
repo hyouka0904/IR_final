@@ -10,10 +10,12 @@ Extraction that fails, or finds no image in the archive (an all-zero file reads 
 deletes the archive and downloads it once more. check_only=True reports without touching files.
 """
 import ftplib
+import http.client
 import os
 import shutil
 import sys
 import tarfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,6 +25,8 @@ from pathlib import Path
 from PIL import Image
 
 TIMEOUT = 60  # seconds without data before giving up (a firewall that drops FTP would hang forever)
+RETRIES = 5     # a connection that drops mid-transfer is resumed this many times
+RETRY_WAIT = 10  # seconds before each retry (tests set 0)
 JPEG_EOI = b"\xff\xd9"
 
 
@@ -88,25 +92,53 @@ def _fetch_ftp(url: str, part: Path, progress: Progress) -> None:
             ftp.retrbinary(f"RETR {path}", write, blocksize=1 << 16, rest=progress.done or None)
 
 
+class IncompleteDownload(OSError):
+    """The server closed the connection before the whole file arrived."""
+
+
+def _retryable(e: BaseException) -> bool:
+    """Dropped connections and timeouts are retried; "not found" / "forbidden" are not."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code >= 500
+    if isinstance(e, ftplib.error_perm):
+        return False
+    return isinstance(e, (OSError, EOFError, ftplib.Error, http.client.HTTPException))
+
+
 def fetch(url: str, dst: Path) -> Path:
-    """Download url to dst (skipped if dst exists and is non-empty), resuming a `.part`."""
+    """Download url to dst (skipped if dst exists and is non-empty), resuming a `.part`. A
+    timeout or dropped connection resumes from where it stopped, up to RETRIES times."""
     dst = Path(dst)
     if dst.exists() and dst.stat().st_size > 0:
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
     part = dst.with_name(dst.name + ".part")
-    offset = part.stat().st_size if part.exists() else 0
-    print(f">> download {url}" + (f" (resuming at {offset / 2**20:,.0f} MB)" if offset else ""),
-          flush=True)
-    progress = Progress(offset)
-    if url.startswith("ftp://"):
-        _fetch_ftp(url, part, progress)
-    else:
-        _fetch_http(url, part, progress)
-    # a connection that ends early without an error leaves a short file: keep it as .part
-    if progress.total and part.stat().st_size != progress.total:
-        raise OSError(f"{dst.name} is incomplete ({part.stat().st_size:,} / {progress.total:,} "
-                      f"bytes); run again to resume")
+    for attempt in range(RETRIES + 1):
+        offset = part.stat().st_size if part.exists() else 0
+        if attempt == 0:
+            print(f">> download {url}" + (f" (resuming at {_mb(offset)})" if offset else ""),
+                  flush=True)
+        progress = Progress(offset)
+        try:
+            if url.startswith("ftp://"):
+                _fetch_ftp(url, part, progress)
+            else:
+                _fetch_http(url, part, progress)
+            # a connection that ends early without an error leaves a short file
+            if progress.total and part.stat().st_size != progress.total:
+                raise IncompleteDownload(f"{part.stat().st_size:,} / {progress.total:,} bytes")
+            break
+        except Exception as e:
+            if not _retryable(e):
+                raise
+            if attempt == RETRIES:
+                raise IncompleteDownload(
+                    f"{dst.name}: the connection kept dropping ({type(e).__name__}: {e}); "
+                    f"{_mb(part.stat().st_size if part.exists() else 0)} kept in {part.name}, "
+                    f"run again to resume") from e
+            print(f"!! connection lost ({type(e).__name__}: {e}); resuming in {RETRY_WAIT}s "
+                  f"(retry {attempt + 1}/{RETRIES})", flush=True)
+            time.sleep(RETRY_WAIT)
     os.replace(part, dst)
     return dst
 

@@ -5,6 +5,7 @@
                              [--rerank aqe mmr ...]
 """
 import argparse
+from pathlib import Path
 
 import _bootstrap  # noqa: F401
 from PIL import Image
@@ -27,6 +28,8 @@ def main():
     ap.add_argument("--rerank", nargs="+", choices=[r for r in RERANKERS if r != "rocchio"],
                     default=[], help="rocchio needs marked results; use the demo")
     args = ap.parse_args()
+    if not Path(args.photo).is_file():
+        ap.error(f"photo not found: {args.photo}")
 
     root = resolve_path(cfg, "data")
     files = {r["image_id"]: gallery_path(cfg, r) for r in read_manifest(root / "gallery.json")}

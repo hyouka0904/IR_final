@@ -74,6 +74,14 @@
 - 01_download：小於 1 MB 的檔案顯示 KB（原本 gnd pkl 顯示 `0 MB / 0 MB`）；ROxford 圖片還沒解壓時顯示「not extracted yet; downloading the archives」，不再是「missing or broken; extracting again」。
 - 待觀察：clip@ivfpq recall_loss@10=0.30、clip@cluster 0.21（3,491 張）；tags 的 top df 有 saucer / islet 等（Holidays 風景照 + 每張固定 15 個 tag），報告可討論。
 
+## 2026-11-25 第二輪伺服器 log（siglip / dinov2 / phash 都跑完，05 全部有數字）
+
+- ROxford 下載到 647 MB 時 `TimeoutError: The read operation timed out`，整個 01 traceback。`fetch` 改為遇到逾時 / 斷線就從 `.part` 接續重試（最多 5 次，間隔 10 秒；404 等 4xx 不重試）；仍失敗時 01 對該資料集印訊息、保留 `.part`，繼續下一個資料集（RParis），最後 exit 1，讓 `01 --with-roxford && 08` 不會接著跑 08。另修正 `revisited()` 後一個資料集成功會把前一個的失敗蓋成 ✓。
+- `search.py my_photo.jpg`：README 的佔位檔名，使用者照抄。README 範例改成 `data/holidays/jpg/100000.jpg --task similar`；找不到檔案時 argparse 錯誤訊息，不再 traceback。
+- Gradio 5（伺服器 5.x）：`gr.Blocks(js=)` 印 DeprecationWarning，但 5.50 的 `launch()` 還不收 js。改成 launch 收 js（Gradio 6）就放 launch，否則放 Blocks 並只忽略那一條警告。已用 gradio 5.50 venv 驗證 test_demo 通過、沒有 js 警告。
+- 結果觀察（3,491 張）：semantic nDCG@10 siglip 0.648 > dinov2 0.637 > fusion 0.632 > tags 0.615 > clip 0.603；box 上 dinov2 0.745 最高；holidays mAP siglip 0.911；ivfpq recall_loss clip 0.371 / siglip 0.417（nbits 被壓到 6 的代價，40k 時應改善），hnsw 0.000；pairs 合成配對 dinov2 / clip 8/10。
+- 使用者流程：2000 張全部跑通、網頁測完回報正常後，才把預設改成 gallery 40000 / queries 1000，再從 01 重跑一遍。
+
 ## 重要決策
 
 - **data/ 結構與舊 branch 相容**：`data/coco/annotations`、`data/coco/{train2017,val2017}`、`data/holidays/jpg`、`data/datasets/<ds>` 都和舊 branch 一樣，伺服器上已下載的資料可以直接用；舊位置的 `data/coco/annotations_trainval2017.zip` 會自動搬到 zip 版本的位置 `data/annotations_trainval2017.zip`。

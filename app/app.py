@@ -9,6 +9,7 @@ import argparse
 import inspect
 import os
 import sys
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -53,9 +54,9 @@ def editor_image(value) -> Image.Image | None:
     return value if isinstance(value, Image.Image) else Image.fromarray(value)
 
 
-def _blocks_takes(name: str) -> bool:
-    # Gradio 5 takes js / theme on gr.Blocks, Gradio 6 on launch()
-    return name in inspect.signature(gr.Blocks.__init__).parameters
+def _js_on_launch() -> bool:
+    """Gradio 6 takes js on launch(); Gradio 5 only on gr.Blocks (which warns that it moves)."""
+    return "js" in inspect.signature(gr.Blocks.launch).parameters
 
 
 def build_app(state: DemoState) -> gr.Blocks:
@@ -121,9 +122,12 @@ def build_app(state: DemoState) -> gr.Blocks:
         return Image.open(query_image_path(cfg, qid)).convert("RGB"), qid
 
     blocks_kw = {"title": "Zero-shot image search"}
-    if _blocks_takes("js"):
+    if not _js_on_launch():
         blocks_kw["js"] = THEME_JS
-    with gr.Blocks(**blocks_kw) as demo:
+    with warnings.catch_warnings():  # Gradio 5: "js ... will be removed in Gradio 6.0" (handled)
+        warnings.filterwarnings("ignore", message=".*'js' parameter.*", category=DeprecationWarning)
+        demo = gr.Blocks(**blocks_kw)
+    with demo:
         with gr.Row():
             gr.Markdown("## Zero-shot image-to-image search")
             theme_btn = gr.Button("🌓 Light / dark", size="sm", scale=0, min_width=140)
@@ -190,7 +194,7 @@ def launch_kwargs(cfg: dict, host: str | None = None, port: int | None = None,
         if not sep or not user:
             raise SystemExit("--auth must look like user:password")
         kw["auth"] = (user, password)
-    if not _blocks_takes("js"):
+    if _js_on_launch():
         kw["js"] = THEME_JS
     return kw
 
