@@ -11,6 +11,103 @@
 
 > **狀態：** 所有元件都已實作（2026 年 11 月）：CLIP、SigLIP、DINOv2、pHash；FAISS Flat、HW2 cluster pruning、IVF-PQ、HNSW；CLIP zero-shot 標籤建成 HW1 格式的倒排索引並用 HW2 的 BM25 計分、RRF 融合；alpha-QE、Rocchio、MMR；合成編輯、INRIA Holidays、框選查詢、手機照片人工標註與 Cohen's kappa、ROxford／RParis 補充實驗；Gradio demo、照片配對檢查、資料完整性檢查，以及在 Windows 與 Linux 上跑的 CI。還沒做的是 4 萬張規模的完整實驗和手機照片的標註（見「時程」）。
 
+## 快速開始
+
+預設設定只跑一小部分資料：圖庫 2,000 張、語意查詢 200 張、相似查詢 200 張，外加 INRIA Holidays 的 1,491 張。要放大規模，把 `configs/default.yaml` 裡的 `data.*` 調到 40,000／1,000／1,000。只有抽 embedding（02、03、08）需要 GPU，檢索、評估和 demo 都可以在 CPU 上執行。
+
+### 1. 建立環境
+
+需要 Python 3.11 以上。先依顯示卡驅動裝 PyTorch，再裝其他套件：
+
+```bash
+python -m venv .venv
+.venv/Scripts/activate            # Windows（PowerShell：.venv\Scripts\Activate.ps1）
+source .venv/bin/activate         # Linux／macOS
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # 見下表
+pip install -r requirements.txt
+python -c "import torch, faiss, open_clip; print(torch.__version__, torch.cuda.is_available())"
+```
+
+| `nvidia-smi` 顯示的 `CUDA Version` | `--index-url` 結尾 |
+|---|---|
+| 12.8 以上（含 13.x） | `cu128` |
+| 12.6、12.7 | `cu126` |
+| 12.4、12.5 | `cu124`，並指定 `"torch==2.6.*" "torchvision==0.21.*"` |
+| 更舊 | 先更新驅動（`cu121` 最高只有 torch 2.5.1，open_clip 不支援） |
+| 沒有 NVIDIA 顯卡 | 拿掉 `--index-url`（裝 CPU 版） |
+
+用 conda 的話，從 conda-forge 建環境就不需要同意 Anaconda 的服務條款：`conda create -n zsis -c conda-forge --override-channels python=3.12`。
+
+### 2. 依序執行
+
+```bash
+python scripts/01_download.py --check-only --with-roxford   # 哪些完整、哪些下載到一半、哪些壞掉
+python scripts/01_download.py            # 標註、COCO 子集、Holidays；會接續下載並修復
+python scripts/check_data.py             # 資料完整性檢查（02–04 之後再跑一次：快取是否涵蓋整個圖庫）
+python scripts/02_embed.py --models clip siglip dinov2 phash
+python scripts/03_tag.py                 # CLIP zero-shot 標籤 -> cache/tags*/（HW1 postings 格式）
+python scripts/04_build_index.py --index flat cluster ivfpq hnsw
+python scripts/05_evaluate.py            # 所有查詢集的交叉表
+python scripts/05_evaluate.py --experiments   # 消融、重排、索引比較
+python scripts/06_pairs.py               # 照片配對檢查 -> results/pairs.csv
+python scripts/07_judging.py pool        # 手機照片：pool -> 標註 -> kappa -> qrels（見下方）
+python scripts/01_download.py --with-roxford && python scripts/08_roxford.py   # 補充實驗
+python scripts/search.py data/holidays/jpg/100000.jpg --task similar --index hnsw --rerank aqe mmr
+python app/app.py                        # 網頁 demo，開 http://127.0.0.1:7860
+```
+
+- **01 會先檢查再下載。** 完整的檔案跳過；中斷的下載（`.part`）接續；比遠端小的封存檔（舊版程式中斷留下的）也接續；比遠端大或解不開的重新下載；壞掉的圖（大小為 0、讀不出來、被截斷）刪掉後重新下載或解壓。中斷後直接重跑即可。`--check-only` 只回報、不改任何檔案；`--skip-holidays` 不下載 Holidays。
+- **Holidays 放在 FTP 上**，有些網路會擋。01 在 60 秒收不到資料時會放棄並繼續後面的步驟（之後 `holidays` 查詢集會略過）。可以在 `sources.holidays` 換成鏡像站，或在別的網路下載 `jpg1.tar.gz`／`jpg2.tar.gz` 放到 `data/holidays/` 再重跑 01。
+- **05 的選項：** `--configs fusion+aqe clip@hnsw …` 跑指定的設定組合，`--tasks semantic box …` 跑指定的查詢集。搜尋一律在單一 CPU 執行緒上計時。
+- **手機照片（使用者研究）：** 把約 100 張照片放到 `data/phone/`（HEIC 請先轉檔）。`07_judging.py pool` 會寫出 `results/phone/judgments.csv`（順序打亂、不含系統名稱）和看圖用的 `judgments.html`；兩位評審分別在 `judge_a`／`judge_b` 填 0／1／2（用 Excel 填也可以）。接著跑 `07_judging.py kappa`、`07_judging.py qrels`、`05_evaluate.py --tasks phone`。
+- 要用 `trec_eval` 重新計分 TREC run，請加 `-l 2`（等級 ≥ 2 的圖就是 mAP 算作相關的那些），例如 `trec_eval -l 2 -m map -m ndcg_cut.10 results/runs/semantic.qrels results/runs/semantic_clip.run`。trec_eval 的 nDCG 用的是 0–3 的整數等級，所以和 `summary.csv` 裡用小數增益算出的 nDCG 會有些微差距。
+
+### Windows
+
+全部都是 Python，不需要 bash、WSL、curl、wget、unzip 或 tar。路徑請用 `/`，同一份指令在兩個系統上都能用。
+
+- repo 放在只有英數字、且不在 OneDrive 同步範圍內的路徑（FAISS 無法把索引寫到含中文的路徑，資料加快取也超過 10 GB），例如 `C:\work\ir_image_search`。
+- 設定 `PYTHONUTF8=1`，讓 Python 用 UTF-8 而不是系統編碼（繁中是 cp950）讀寫檔案：`setx PYTHONUTF8 1`（之後開的終端機生效），用 conda 則是 `conda env config vars set PYTHONUTF8=1`。
+- demo 請開 `http://127.0.0.1:7860`；`0.0.0.0` 是伺服器監聽的位址，瀏覽器打不開。
+
+### 在 Linux 伺服器上執行，從區網或 VPN 連線
+
+```bash
+tmux new -s demo                                  # 登出後繼續執行（Ctrl+B 再按 D 離開）
+python app/app.py --host 0.0.0.0 --auth team27:<密碼>
+hostname -I                                       # 伺服器的 IP
+sudo ufw allow from 192.168.0.0/16 to any port 7860 proto tcp   # 有開 ufw 才需要；網段依實際環境修改
+```
+
+其他電腦開 `http://<伺服器 IP>:7860`（走 VPN 時用 VPN 網卡的位址，例如 Tailscale 的 `100.x.x.x`）。demo 本身沒有登入保護，只要別台電腦連得到就請設 `--auth`（或環境變數 `IR_DEMO_AUTH=帳號:密碼`）。`--port` 換 port，`--share` 另外產生暫時的 Gradio 公開網址。01–05 這些耗時的步驟也建議在 tmux 裡跑。
+
+### 測試與 CI
+
+```bash
+python -m pytest -m "not models and not smoke"   # 單元測試，幾秒鐘
+python -m pytest -m smoke                         # 用假資料把 01–07 從頭跑一遍
+python -m pytest -m models                        # 真實的 CLIP／SigLIP／DINOv2 權重
+```
+
+冒煙測試用本機 HTTP server 提供一份很小的假 COCO／Holidays，並以假的 encoder 取代模型，所以不需要網路、GPU 或模型權重；過程中也會跑資料完整性檢查。GitHub Actions（`.github/workflows/ci.yml`）在每次 push 與 PR 時，於 Ubuntu 和 Windows 上跑語法檢查、單元測試和冒煙測試，只安裝 `requirements-ci.txt`（不含 torch）。
+
+### 用壓縮檔在別台電腦執行
+
+`python scripts/makezip.py` 會把專案打包成 `dist/ir_image_search-<日期>.zip`。裡面有程式碼、圖庫的圖（COCO 與 Holidays）、val 圖、manifest、標籤清單、照片配對、embedding／標籤／索引的快取，以及每個查詢的結果，所以拿到的人不用重新下載或重抽 embedding。加 `--code-only` 則只打包 git 裡的檔案。不會打包的有：`.venv`、`data/user/` 裡從 demo 加進去的照片，以及 `instances_train2017.json`（只有 `01_download.py` 用得到）。
+
+拿到壓縮檔的電腦：
+
+```bash
+cd ir_image_search
+python -m venv .venv && .venv/Scripts/activate   # Windows；其他系統用 .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest -m "not models"       # 應該全部通過
+python app/app.py                      # demo，開 http://127.0.0.1:7860
+python scripts/05_evaluate.py          # 重現 results/summary.csv
+```
+
+第一次搜尋會從 Hugging Face 下載模型權重（含 SigLIP 約 1.5 GB，只需一次）。
+
 ## 為什麼分兩個任務
 
 同一張 query 在不同任務下，相關的結果不一樣。以一張「貓在沙發上」的照片為例，語意搜尋認為所有的貓都相關，相似影像搜尋則只認這張照片的副本。本專題的核心問題是：
@@ -162,103 +259,6 @@ flowchart LR
 - 評估腳本和 demo 呼叫同一份 `src/pipeline.py`，確保 demo 呈現的就是評估過的結果。
 - `src/schema.py` 固定兩位組員模組之間傳遞的資料格式。
 - 延遲分三段記錄，搜尋一律在 CPU 上量。
-
-## 快速開始
-
-預設設定只跑一小部分資料：圖庫 2,000 張、語意查詢 200 張、相似查詢 200 張，外加 INRIA Holidays 的 1,491 張。要放大規模，把 `configs/default.yaml` 裡的 `data.*` 調到 40,000／1,000／1,000。只有抽 embedding（02、03、08）需要 GPU，檢索、評估和 demo 都可以在 CPU 上執行。
-
-### 1. 建立環境
-
-需要 Python 3.11 以上。先依顯示卡驅動裝 PyTorch，再裝其他套件：
-
-```bash
-python -m venv .venv
-.venv/Scripts/activate            # Windows（PowerShell：.venv\Scripts\Activate.ps1）
-source .venv/bin/activate         # Linux／macOS
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # 見下表
-pip install -r requirements.txt
-python -c "import torch, faiss, open_clip; print(torch.__version__, torch.cuda.is_available())"
-```
-
-| `nvidia-smi` 顯示的 `CUDA Version` | `--index-url` 結尾 |
-|---|---|
-| 12.8 以上（含 13.x） | `cu128` |
-| 12.6、12.7 | `cu126` |
-| 12.4、12.5 | `cu124`，並指定 `"torch==2.6.*" "torchvision==0.21.*"` |
-| 更舊 | 先更新驅動（`cu121` 最高只有 torch 2.5.1，open_clip 不支援） |
-| 沒有 NVIDIA 顯卡 | 拿掉 `--index-url`（裝 CPU 版） |
-
-用 conda 的話，從 conda-forge 建環境就不需要同意 Anaconda 的服務條款：`conda create -n zsis -c conda-forge --override-channels python=3.12`。
-
-### 2. 依序執行
-
-```bash
-python scripts/01_download.py --check-only --with-roxford   # 哪些完整、哪些下載到一半、哪些壞掉
-python scripts/01_download.py            # 標註、COCO 子集、Holidays；會接續下載並修復
-python scripts/check_data.py             # 資料完整性檢查（02–04 之後再跑一次：快取是否涵蓋整個圖庫）
-python scripts/02_embed.py --models clip siglip dinov2 phash
-python scripts/03_tag.py                 # CLIP zero-shot 標籤 -> cache/tags*/（HW1 postings 格式）
-python scripts/04_build_index.py --index flat cluster ivfpq hnsw
-python scripts/05_evaluate.py            # 所有查詢集的交叉表
-python scripts/05_evaluate.py --experiments   # 消融、重排、索引比較
-python scripts/06_pairs.py               # 照片配對檢查 -> results/pairs.csv
-python scripts/07_judging.py pool        # 手機照片：pool -> 標註 -> kappa -> qrels（見下方）
-python scripts/01_download.py --with-roxford && python scripts/08_roxford.py   # 補充實驗
-python scripts/search.py data/holidays/jpg/100000.jpg --task similar --index hnsw --rerank aqe mmr
-python app/app.py                        # 網頁 demo，開 http://127.0.0.1:7860
-```
-
-- **01 會先檢查再下載。** 完整的檔案跳過；中斷的下載（`.part`）接續；比遠端小的封存檔（舊版程式中斷留下的）也接續；比遠端大或解不開的重新下載；壞掉的圖（大小為 0、讀不出來、被截斷）刪掉後重新下載或解壓。中斷後直接重跑即可。`--check-only` 只回報、不改任何檔案；`--skip-holidays` 不下載 Holidays。
-- **Holidays 放在 FTP 上**，有些網路會擋。01 在 60 秒收不到資料時會放棄並繼續後面的步驟（之後 `holidays` 查詢集會略過）。可以在 `sources.holidays` 換成鏡像站，或在別的網路下載 `jpg1.tar.gz`／`jpg2.tar.gz` 放到 `data/holidays/` 再重跑 01。
-- **05 的選項：** `--configs fusion+aqe clip@hnsw …` 跑指定的設定組合，`--tasks semantic box …` 跑指定的查詢集。搜尋一律在單一 CPU 執行緒上計時。
-- **手機照片（使用者研究）：** 把約 100 張照片放到 `data/phone/`（HEIC 請先轉檔）。`07_judging.py pool` 會寫出 `results/phone/judgments.csv`（順序打亂、不含系統名稱）和看圖用的 `judgments.html`；兩位評審分別在 `judge_a`／`judge_b` 填 0／1／2（用 Excel 填也可以）。接著跑 `07_judging.py kappa`、`07_judging.py qrels`、`05_evaluate.py --tasks phone`。
-- 要用 `trec_eval` 重新計分 TREC run，請加 `-l 2`（等級 ≥ 2 的圖就是 mAP 算作相關的那些），例如 `trec_eval -l 2 -m map -m ndcg_cut.10 results/runs/semantic.qrels results/runs/semantic_clip.run`。trec_eval 的 nDCG 用的是 0–3 的整數等級，所以和 `summary.csv` 裡用小數增益算出的 nDCG 會有些微差距。
-
-### Windows
-
-全部都是 Python，不需要 bash、WSL、curl、wget、unzip 或 tar。路徑請用 `/`，同一份指令在兩個系統上都能用。
-
-- repo 放在只有英數字、且不在 OneDrive 同步範圍內的路徑（FAISS 無法把索引寫到含中文的路徑，資料加快取也超過 10 GB），例如 `C:\work\ir_image_search`。
-- 設定 `PYTHONUTF8=1`，讓 Python 用 UTF-8 而不是系統編碼（繁中是 cp950）讀寫檔案：`setx PYTHONUTF8 1`（之後開的終端機生效），用 conda 則是 `conda env config vars set PYTHONUTF8=1`。
-- demo 請開 `http://127.0.0.1:7860`；`0.0.0.0` 是伺服器監聽的位址，瀏覽器打不開。
-
-### 在 Linux 伺服器上執行，從區網或 VPN 連線
-
-```bash
-tmux new -s demo                                  # 登出後繼續執行（Ctrl+B 再按 D 離開）
-python app/app.py --host 0.0.0.0 --auth team27:<密碼>
-hostname -I                                       # 伺服器的 IP
-sudo ufw allow from 192.168.0.0/16 to any port 7860 proto tcp   # 有開 ufw 才需要；網段依實際環境修改
-```
-
-其他電腦開 `http://<伺服器 IP>:7860`（走 VPN 時用 VPN 網卡的位址，例如 Tailscale 的 `100.x.x.x`）。demo 本身沒有登入保護，只要別台電腦連得到就請設 `--auth`（或環境變數 `IR_DEMO_AUTH=帳號:密碼`）。`--port` 換 port，`--share` 另外產生暫時的 Gradio 公開網址。01–05 這些耗時的步驟也建議在 tmux 裡跑。
-
-### 測試與 CI
-
-```bash
-python -m pytest -m "not models and not smoke"   # 單元測試，幾秒鐘
-python -m pytest -m smoke                         # 用假資料把 01–07 從頭跑一遍
-python -m pytest -m models                        # 真實的 CLIP／SigLIP／DINOv2 權重
-```
-
-冒煙測試用本機 HTTP server 提供一份很小的假 COCO／Holidays，並以假的 encoder 取代模型，所以不需要網路、GPU 或模型權重；過程中也會跑資料完整性檢查。GitHub Actions（`.github/workflows/ci.yml`）在每次 push 與 PR 時，於 Ubuntu 和 Windows 上跑語法檢查、單元測試和冒煙測試，只安裝 `requirements-ci.txt`（不含 torch）。
-
-### 用壓縮檔在別台電腦執行
-
-`python scripts/makezip.py` 會把專案打包成 `dist/ir_image_search-<日期>.zip`。裡面有程式碼、圖庫的圖（COCO 與 Holidays）、val 圖、manifest、標籤清單、照片配對、embedding／標籤／索引的快取，以及每個查詢的結果，所以拿到的人不用重新下載或重抽 embedding。加 `--code-only` 則只打包 git 裡的檔案。不會打包的有：`.venv`、`data/user/` 裡從 demo 加進去的照片，以及 `instances_train2017.json`（只有 `01_download.py` 用得到）。
-
-拿到壓縮檔的電腦：
-
-```bash
-cd ir_image_search
-python -m venv .venv && .venv/Scripts/activate   # Windows；其他系統用 .venv/bin/activate
-pip install -r requirements.txt
-python -m pytest -m "not models"       # 應該全部通過
-python app/app.py                      # demo，開 http://127.0.0.1:7860
-python scripts/05_evaluate.py          # 重現 results/summary.csv
-```
-
-第一次搜尋會從 Hugging Face 下載模型權重（含 SigLIP 約 1.5 GB，只需一次）。
 
 ## Demo
 

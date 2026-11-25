@@ -11,6 +11,103 @@ No model is trained or fine-tuned. Every component is pre-trained, so any photo 
 
 > **Status:** all components are implemented (November 2026): CLIP, SigLIP, DINOv2 and pHash; FAISS Flat, HW2 cluster pruning, IVF-PQ and HNSW; CLIP zero-shot tags in an HW1-format inverted index with HW2 BM25 and RRF fusion; alpha-QE, Rocchio and MMR; synthetic edits, INRIA Holidays, box queries, phone-photo judging with Cohen's kappa and the ROxford/RParis run; the Gradio demo, the photo-pair check, a data integrity check and CI on Windows and Linux. The 40k-image runs and the phone-photo judging are still to be done (see *Roadmap*).
 
+## Getting started
+
+The default config runs on a small slice: 2,000 gallery images, 200 semantic queries, 200 similar queries, plus the 1,491 INRIA Holidays images. Raise `data.*` in `configs/default.yaml` toward 40,000 / 1,000 / 1,000 to scale up. A GPU is needed only for embedding (02, 03, 08); search, evaluation and the demo run on CPU.
+
+### 1. Environment
+
+Python 3.11 or newer. Install PyTorch first, matching your GPU driver, then the rest:
+
+```bash
+python -m venv .venv
+.venv/Scripts/activate            # Windows (PowerShell: .venv\Scripts\Activate.ps1)
+source .venv/bin/activate         # Linux / macOS
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # see below
+pip install -r requirements.txt
+python -c "import torch, faiss, open_clip; print(torch.__version__, torch.cuda.is_available())"
+```
+
+| `CUDA Version` shown by `nvidia-smi` | `--index-url` ending |
+|---|---|
+| 12.8 or newer (13.x included) | `cu128` |
+| 12.6, 12.7 | `cu126` |
+| 12.4, 12.5 | `cu124`, with `"torch==2.6.*" "torchvision==0.21.*"` |
+| older | update the driver first (`cu121` stops at torch 2.5.1, too old for open_clip) |
+| no NVIDIA GPU | leave out `--index-url` (CPU build) |
+
+With conda, create the environment from conda-forge so no Anaconda terms of service are needed: `conda create -n zsis -c conda-forge --override-channels python=3.12`.
+
+### 2. Run the steps
+
+```bash
+python scripts/01_download.py --check-only --with-roxford   # what is complete, partial, broken
+python scripts/01_download.py            # annotations, COCO subset, Holidays; resumes and repairs
+python scripts/check_data.py             # data integrity (again after 02-04: caches vs gallery)
+python scripts/02_embed.py --models clip siglip dinov2 phash
+python scripts/03_tag.py                 # CLIP zero-shot tags -> cache/tags*/ (HW1 postings format)
+python scripts/04_build_index.py --index flat cluster ivfpq hnsw
+python scripts/05_evaluate.py            # cross table on every query set
+python scripts/05_evaluate.py --experiments   # ablations, re-ranking, index comparison
+python scripts/06_pairs.py               # photo-pair check -> results/pairs.csv
+python scripts/07_judging.py pool        # phone photos: pool -> judge -> kappa -> qrels (below)
+python scripts/01_download.py --with-roxford && python scripts/08_roxford.py   # supplementary
+python scripts/search.py data/holidays/jpg/100000.jpg --task similar --index hnsw --rerank aqe mmr
+python app/app.py                        # web demo on http://127.0.0.1:7860
+```
+
+- **01 checks before it downloads.** Complete files are kept, an interrupted download (`.part`) resumes, an archive smaller than the remote file (left by an older run) resumes too, a larger or unreadable one is fetched again, and broken images (empty, unreadable, truncated) are deleted and downloaded or extracted again. Rerun it after any interruption. `--check-only` reports without changing anything; `--skip-holidays` leaves Holidays out.
+- **Holidays is on FTP**, which some networks block. 01 gives up after 60 seconds without data and carries on without it (the `holidays` set is then skipped). Put a mirror in `sources.holidays`, or fetch `jpg1.tar.gz` / `jpg2.tar.gz` elsewhere into `data/holidays/` and rerun 01.
+- **05 options:** `--configs fusion+aqe clip@hnsw …` runs chosen configurations, `--tasks semantic box …` chosen query sets. Search is timed on one CPU thread.
+- **Phone photos (user study):** put about 100 photos in `data/phone/` (convert HEIC first). `07_judging.py pool` writes `results/phone/judgments.csv` (shuffled, no system names) and `judgments.html` to view the images; each judge fills `judge_a` / `judge_b` with 0 / 1 / 2 (Excel is fine). Then `07_judging.py kappa`, `07_judging.py qrels` and `05_evaluate.py --tasks phone`.
+- To re-score the TREC runs with `trec_eval`, pass `-l 2` (grades ≥ 2 are exactly the images counted as relevant for mAP), e.g. `trec_eval -l 2 -m map -m ndcg_cut.10 results/runs/semantic.qrels results/runs/semantic_clip.run`. trec_eval's nDCG uses the integer grades 0–3, so it differs slightly from the float-gain nDCG in `summary.csv`.
+
+### Windows
+
+Everything is Python; no bash, WSL, curl, wget, unzip or tar is needed. Use `/` in paths so the same commands work on both systems.
+
+- Keep the repo on an ASCII-only path outside OneDrive (FAISS can't write indexes to non-ASCII paths, and the data plus caches exceed 10 GB), e.g. `C:\work\ir_image_search`.
+- Set `PYTHONUTF8=1` so Python reads and writes UTF-8 instead of the system code page: `setx PYTHONUTF8 1` (new terminals), or with conda `conda env config vars set PYTHONUTF8=1`.
+- Open the demo at `http://127.0.0.1:7860`; `0.0.0.0` is a listening address, not one a browser can open.
+
+### On a Linux server, reachable from the LAN or a VPN
+
+```bash
+tmux new -s demo                                  # keeps running after you log out (Ctrl+B, D)
+python app/app.py --host 0.0.0.0 --auth team27:<password>
+hostname -I                                       # the server's addresses
+sudo ufw allow from 192.168.0.0/16 to any port 7860 proto tcp   # if ufw is on; adjust the range
+```
+
+Other machines open `http://<server address>:7860` (the VPN interface's address over a VPN, e.g. Tailscale's `100.x.x.x`). The demo has no login of its own, so set `--auth` (or `IR_DEMO_AUTH=user:password`) whenever it is reachable from other machines. `--port` changes the port, `--share` adds a temporary public Gradio link. Run the long steps (01–05) inside tmux too.
+
+### Tests and CI
+
+```bash
+python -m pytest -m "not models and not smoke"   # unit tests, a few seconds
+python -m pytest -m smoke                         # scripts 01-07 end to end on fake data
+python -m pytest -m models                        # real CLIP / SigLIP / DINOv2 weights
+```
+
+The smoke test serves a tiny fake COCO / Holidays set from a local HTTP server and replaces the models with a fake encoder, so it needs no network, GPU or weights; it also runs the data integrity check. GitHub Actions (`.github/workflows/ci.yml`) runs the syntax check, the unit tests and the smoke test on Ubuntu and Windows for every push and pull request, installing only `requirements-ci.txt` (no torch).
+
+### Running from the zip
+
+`python scripts/makezip.py` packs the project into `dist/ir_image_search-<date>.zip`. The zip holds the code, the gallery images (COCO and Holidays), the val images, the manifests, the label lists, the photo pairs, the embedding/tag/index caches and the per-query results, so nothing has to be downloaded or re-embedded. `--code-only` packs just the git files instead. Not included: `.venv`, demo photos in `data/user/`, and `instances_train2017.json`, which only `01_download.py` needs.
+
+On the receiving PC:
+
+```bash
+cd ir_image_search
+python -m venv .venv && .venv/Scripts/activate   # Windows; use .venv/bin/activate elsewhere
+pip install -r requirements.txt
+python -m pytest -m "not models"       # should all pass
+python app/app.py                      # demo on http://127.0.0.1:7860
+python scripts/05_evaluate.py          # reproduces results/summary.csv
+```
+
+The first search downloads the model weights from Hugging Face (about 1.5 GB with SigLIP, once).
+
 ## Why two tasks
 
 The same query has different relevant results depending on the task. For a photo of a cat on a sofa, semantic search counts every cat as relevant, while similar-image search counts only copies of that photo. The project's core question is:
@@ -162,103 +259,6 @@ A configuration is labelled `representation[@index][+reranker…]`, e.g. `fusion
 - Evaluation scripts and the demo call the same `src/pipeline.py`, so the demo shows exactly what was evaluated.
 - `src/schema.py` fixes the data passed between the two members' modules.
 - Latency is recorded in three stages, with search always on CPU.
-
-## Getting started
-
-The default config runs on a small slice: 2,000 gallery images, 200 semantic queries, 200 similar queries, plus the 1,491 INRIA Holidays images. Raise `data.*` in `configs/default.yaml` toward 40,000 / 1,000 / 1,000 to scale up. A GPU is needed only for embedding (02, 03, 08); search, evaluation and the demo run on CPU.
-
-### 1. Environment
-
-Python 3.11 or newer. Install PyTorch first, matching your GPU driver, then the rest:
-
-```bash
-python -m venv .venv
-.venv/Scripts/activate            # Windows (PowerShell: .venv\Scripts\Activate.ps1)
-source .venv/bin/activate         # Linux / macOS
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # see below
-pip install -r requirements.txt
-python -c "import torch, faiss, open_clip; print(torch.__version__, torch.cuda.is_available())"
-```
-
-| `CUDA Version` shown by `nvidia-smi` | `--index-url` ending |
-|---|---|
-| 12.8 or newer (13.x included) | `cu128` |
-| 12.6, 12.7 | `cu126` |
-| 12.4, 12.5 | `cu124`, with `"torch==2.6.*" "torchvision==0.21.*"` |
-| older | update the driver first (`cu121` stops at torch 2.5.1, too old for open_clip) |
-| no NVIDIA GPU | leave out `--index-url` (CPU build) |
-
-With conda, create the environment from conda-forge so no Anaconda terms of service are needed: `conda create -n zsis -c conda-forge --override-channels python=3.12`.
-
-### 2. Run the steps
-
-```bash
-python scripts/01_download.py --check-only --with-roxford   # what is complete, partial, broken
-python scripts/01_download.py            # annotations, COCO subset, Holidays; resumes and repairs
-python scripts/check_data.py             # data integrity (again after 02-04: caches vs gallery)
-python scripts/02_embed.py --models clip siglip dinov2 phash
-python scripts/03_tag.py                 # CLIP zero-shot tags -> cache/tags*/ (HW1 postings format)
-python scripts/04_build_index.py --index flat cluster ivfpq hnsw
-python scripts/05_evaluate.py            # cross table on every query set
-python scripts/05_evaluate.py --experiments   # ablations, re-ranking, index comparison
-python scripts/06_pairs.py               # photo-pair check -> results/pairs.csv
-python scripts/07_judging.py pool        # phone photos: pool -> judge -> kappa -> qrels (below)
-python scripts/01_download.py --with-roxford && python scripts/08_roxford.py   # supplementary
-python scripts/search.py data/holidays/jpg/100000.jpg --task similar --index hnsw --rerank aqe mmr
-python app/app.py                        # web demo on http://127.0.0.1:7860
-```
-
-- **01 checks before it downloads.** Complete files are kept, an interrupted download (`.part`) resumes, an archive smaller than the remote file (left by an older run) resumes too, a larger or unreadable one is fetched again, and broken images (empty, unreadable, truncated) are deleted and downloaded or extracted again. Rerun it after any interruption. `--check-only` reports without changing anything; `--skip-holidays` leaves Holidays out.
-- **Holidays is on FTP**, which some networks block. 01 gives up after 60 seconds without data and carries on without it (the `holidays` set is then skipped). Put a mirror in `sources.holidays`, or fetch `jpg1.tar.gz` / `jpg2.tar.gz` elsewhere into `data/holidays/` and rerun 01.
-- **05 options:** `--configs fusion+aqe clip@hnsw …` runs chosen configurations, `--tasks semantic box …` chosen query sets. Search is timed on one CPU thread.
-- **Phone photos (user study):** put about 100 photos in `data/phone/` (convert HEIC first). `07_judging.py pool` writes `results/phone/judgments.csv` (shuffled, no system names) and `judgments.html` to view the images; each judge fills `judge_a` / `judge_b` with 0 / 1 / 2 (Excel is fine). Then `07_judging.py kappa`, `07_judging.py qrels` and `05_evaluate.py --tasks phone`.
-- To re-score the TREC runs with `trec_eval`, pass `-l 2` (grades ≥ 2 are exactly the images counted as relevant for mAP), e.g. `trec_eval -l 2 -m map -m ndcg_cut.10 results/runs/semantic.qrels results/runs/semantic_clip.run`. trec_eval's nDCG uses the integer grades 0–3, so it differs slightly from the float-gain nDCG in `summary.csv`.
-
-### Windows
-
-Everything is Python; no bash, WSL, curl, wget, unzip or tar is needed. Use `/` in paths so the same commands work on both systems.
-
-- Keep the repo on an ASCII-only path outside OneDrive (FAISS can't write indexes to non-ASCII paths, and the data plus caches exceed 10 GB), e.g. `C:\work\ir_image_search`.
-- Set `PYTHONUTF8=1` so Python reads and writes UTF-8 instead of the system code page: `setx PYTHONUTF8 1` (new terminals), or with conda `conda env config vars set PYTHONUTF8=1`.
-- Open the demo at `http://127.0.0.1:7860`; `0.0.0.0` is a listening address, not one a browser can open.
-
-### On a Linux server, reachable from the LAN or a VPN
-
-```bash
-tmux new -s demo                                  # keeps running after you log out (Ctrl+B, D)
-python app/app.py --host 0.0.0.0 --auth team27:<password>
-hostname -I                                       # the server's addresses
-sudo ufw allow from 192.168.0.0/16 to any port 7860 proto tcp   # if ufw is on; adjust the range
-```
-
-Other machines open `http://<server address>:7860` (the VPN interface's address over a VPN, e.g. Tailscale's `100.x.x.x`). The demo has no login of its own, so set `--auth` (or `IR_DEMO_AUTH=user:password`) whenever it is reachable from other machines. `--port` changes the port, `--share` adds a temporary public Gradio link. Run the long steps (01–05) inside tmux too.
-
-### Tests and CI
-
-```bash
-python -m pytest -m "not models and not smoke"   # unit tests, a few seconds
-python -m pytest -m smoke                         # scripts 01-07 end to end on fake data
-python -m pytest -m models                        # real CLIP / SigLIP / DINOv2 weights
-```
-
-The smoke test serves a tiny fake COCO / Holidays set from a local HTTP server and replaces the models with a fake encoder, so it needs no network, GPU or weights; it also runs the data integrity check. GitHub Actions (`.github/workflows/ci.yml`) runs the syntax check, the unit tests and the smoke test on Ubuntu and Windows for every push and pull request, installing only `requirements-ci.txt` (no torch).
-
-### Running from the zip
-
-`python scripts/makezip.py` packs the project into `dist/ir_image_search-<date>.zip`. The zip holds the code, the gallery images (COCO and Holidays), the val images, the manifests, the label lists, the photo pairs, the embedding/tag/index caches and the per-query results, so nothing has to be downloaded or re-embedded. `--code-only` packs just the git files instead. Not included: `.venv`, demo photos in `data/user/`, and `instances_train2017.json`, which only `01_download.py` needs.
-
-On the receiving PC:
-
-```bash
-cd ir_image_search
-python -m venv .venv && .venv/Scripts/activate   # Windows; use .venv/bin/activate elsewhere
-pip install -r requirements.txt
-python -m pytest -m "not models"       # should all pass
-python app/app.py                      # demo on http://127.0.0.1:7860
-python scripts/05_evaluate.py          # reproduces results/summary.csv
-```
-
-The first search downloads the model weights from Hugging Face (about 1.5 GB with SigLIP, once).
 
 ## Demo
 
