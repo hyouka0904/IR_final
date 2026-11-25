@@ -8,8 +8,8 @@ from src.schema import TASKS, SearchRequest, SearchResponse, SearchResult
 def test_load_config_has_required_keys():
     cfg = load_config()
     assert set(cfg["paths"]) >= {"data", "cache", "results"}
-    assert cfg["data"] == {"gallery_size": 2000, "semantic_queries": 200,
-                           "similar_queries": 200, "seed": 27}
+    assert cfg["data"] == {"gallery_size": 40000, "semantic_queries": 1000,
+                           "similar_queries": 1000, "seed": 27}
     assert cfg["models"]["clip"] == {"arch": "ViT-B-32", "pretrained": "laion2b_s34b_b79k"}
     assert cfg["models"]["dinov2"] == {"timm_name": "vit_small_patch14_dinov2.lvd142m",
                                        "image_size": 224}
