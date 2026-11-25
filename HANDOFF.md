@@ -80,6 +80,7 @@
 - `search.py my_photo.jpg`：README 的佔位檔名，使用者照抄。README 範例改成 `data/holidays/jpg/100000.jpg --task similar`；找不到檔案時 argparse 錯誤訊息，不再 traceback。
 - Gradio 5（伺服器 5.x）：`gr.Blocks(js=)` 印 DeprecationWarning，但 5.50 的 `launch()` 還不收 js。改成 launch 收 js（Gradio 6）就放 launch，否則放 Blocks 並只忽略那一條警告。已用 gradio 5.50 venv 驗證 test_demo 通過、沒有 js 警告。
 - 結果觀察（3,491 張）：semantic nDCG@10 siglip 0.648 > dinov2 0.637 > fusion 0.632 > tags 0.615 > clip 0.603；box 上 dinov2 0.745 最高；holidays mAP siglip 0.911；ivfpq recall_loss clip 0.371 / siglip 0.417（nbits 被壓到 6 的代價，40k 時應改善），hnsw 0.000；pairs 合成配對 dinov2 / clip 8/10。
+- CI windows 失敗（run 45572248487 等）：冒煙測試在 `07_judging.py pool` 的 `os.path.relpath` 出 `ValueError: path is on mount 'C:', start on mount 'D:'`（runner 的暫存在 C:，repo 在 D:；真實 Windows 上資料與 repo 不同磁碟也會發生）。`_rel` 改為退回絕對路徑（CSV）/ file:// URL（HTML），加單元測試；actions 升到 checkout@v5、setup-python@v6（Node 20 警告）；`third_party/`（revisitop 程式碼）加入 .gitignore。
 - 使用者流程：2000 張全部跑通、網頁測完回報正常後，才把預設改成 gallery 40000 / queries 1000，再從 01 重跑一遍。
 
 ## 重要決策

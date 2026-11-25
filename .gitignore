@@ -9,3 +9,4 @@ __pycache__/
 *.part
 team27_hw*.zip
 dist/
+third_party/
