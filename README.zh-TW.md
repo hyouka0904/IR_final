@@ -9,7 +9,7 @@
 
 系統不訓練、不 fine-tune 任何模型，所有元件都是預訓練的，任何照片都能直接查詢（zero-shot）。
 
-> **狀態：** 所有元件都已實作（2026 年 11 月）：CLIP、SigLIP、DINOv2、pHash；FAISS Flat、HW2 cluster pruning、IVF-PQ、HNSW；CLIP zero-shot 標籤建成 HW1 格式的倒排索引並用 HW2 的 BM25 計分、RRF 融合；alpha-QE、Rocchio、MMR；合成編輯、INRIA Holidays、框選查詢、手機照片人工標註與 Cohen's kappa、ROxford／RParis 補充實驗；Gradio demo、照片配對檢查、資料完整性檢查，以及在 Windows 與 Linux 上跑的 CI。還沒做的是 4 萬張規模的完整實驗和手機照片的標註（見「時程」）。
+> **狀態：** 所有元件都已實作（2026 年 11 月）：CLIP、SigLIP、DINOv2、pHash；FAISS Flat、HW2 cluster pruning、IVF-PQ、HNSW；CLIP zero-shot 標籤建成 HW1 格式的倒排索引並用 HW2 的 BM25 計分、RRF 融合；alpha-QE、Rocchio、MMR；合成編輯、INRIA Holidays、框選查詢、手機照片人工標註與 Cohen's kappa、ROxford／RParis 補充實驗；Gradio demo、照片配對檢查、資料完整性檢查，以及在 Windows 與 Linux 上跑的 CI。[4 萬張圖庫的完整評估](results/summary.csv)與 [ROxford／RParis 補充評估](results/roxford/summary.csv)已完成。手機照片的人工標註仍待進行（見「時程」）。
 
 ## 目錄
 
@@ -298,7 +298,8 @@ flowchart LR
 - [x] 第二週：CLIP 標籤建成倒排索引、BM25、RRF 融合；合成編輯查詢；網頁 demo
 - [x] 第三週（程式）：Rocchio、alpha-QE、MMR；cluster pruning、IVF-PQ、HNSW；SigLIP；所有查詢集的評估；標註腳本
 - [ ] 第三週（資料）：拍攝並標註手機照片
-- [ ] 第四週：4 萬張規模的完整實驗、ROxford／RParis 補充實驗、困難查詢的錯誤分析、報告與 demo
+- [x] 第四週（評估）：4 萬張圖庫的完整實驗與 ROxford／RParis 補充實驗
+- [ ] 第四週（收尾）：困難查詢的錯誤分析、報告與 demo
 
 ## 團隊
 

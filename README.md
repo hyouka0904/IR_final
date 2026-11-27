@@ -9,7 +9,7 @@ An image-to-image search engine built for an Information Retrieval course final 
 
 No model is trained or fine-tuned. Every component is pre-trained, so any photo can be used as a query (zero-shot).
 
-> **Status:** all components are implemented (November 2026): CLIP, SigLIP, DINOv2 and pHash; FAISS Flat, HW2 cluster pruning, IVF-PQ and HNSW; CLIP zero-shot tags in an HW1-format inverted index with HW2 BM25 and RRF fusion; alpha-QE, Rocchio and MMR; synthetic edits, INRIA Holidays, box queries, phone-photo judging with Cohen's kappa and the ROxford/RParis run; the Gradio demo, the photo-pair check, a data integrity check and CI on Windows and Linux. The 40k-image runs and the phone-photo judging are still to be done (see *Roadmap*).
+> **Status:** all components are implemented (November 2026): CLIP, SigLIP, DINOv2 and pHash; FAISS Flat, HW2 cluster pruning, IVF-PQ and HNSW; CLIP zero-shot tags in an HW1-format inverted index with HW2 BM25 and RRF fusion; alpha-QE, Rocchio and MMR; synthetic edits, INRIA Holidays, box queries, phone-photo judging with Cohen's kappa and the ROxford/RParis run; the Gradio demo, the photo-pair check, a data integrity check and CI on Windows and Linux. The [40,000-image evaluation](results/summary.csv) and the [ROxford/RParis supplementary evaluation](results/roxford/summary.csv) are complete. Phone-photo judging is still pending (see *Roadmap*).
 
 ## Contents
 
@@ -298,7 +298,8 @@ A configuration is labelled `representation[@index][+reranker…]`, e.g. `fusion
 - [x] Week 2: CLIP tags into the inverted index, BM25, RRF fusion; synthetic edit queries; web demo
 - [x] Week 3 (code): Rocchio, alpha-QE, MMR; cluster pruning, IVF-PQ and HNSW; SigLIP; evaluation of every query set; judging scripts
 - [ ] Week 3 (data): take and judge the phone photos
-- [ ] Week 4: full 40k experiments, ROxford/RParis supplementary run, hard-query failure analysis, report and demo
+- [x] Week 4 (evaluation): full 40,000-image experiments and the ROxford/RParis supplementary run
+- [ ] Week 4 (wrap-up): hard-query failure analysis, report and demo
 
 ## Team
 
